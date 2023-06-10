@@ -1,3 +1,8 @@
+// Entry point
+
+mod constants;
+mod diagonal;
+
 use std::borrow::Cow;
 use winit::{
     event::{Event, WindowEvent},
@@ -9,6 +14,9 @@ use winit::{
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
+
+use crate::constants::*;
+use crate::diagonal::*;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
@@ -65,6 +73,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
+    // Content to be drawn
+    let (diagonal_vertex_buffer, diagonal_index_buffer, diagonal_index_len, diagonal_vertex_layout) = make_diagonal_buffers(&device, DEFAULT_STROKE);
+
     // Load the shaders from disk
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
@@ -85,15 +96,20 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &shader,
-            entry_point: "vs_main",
-            buffers: &[],
+            entry_point: "vs_plain",
+            buffers: &[diagonal_vertex_layout],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
-            entry_point: "fs_main",
+            entry_point: "fs_plain",
             targets: &[Some(swapchain_format.into())],
         }),
-        primitive: wgpu::PrimitiveState::default(),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            cull_mode: Some(wgpu::Face::Back),
+            ..wgpu::PrimitiveState::default()
+        },
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
         multiview: None,
@@ -153,7 +169,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         depth_stencil_attachment: None,
                     });
                     rpass.set_pipeline(&render_pipeline);
-                    rpass.draw(0..3, 0..1);
+                    rpass.set_vertex_buffer(0, diagonal_vertex_buffer.slice(..));
+                    rpass.set_index_buffer(diagonal_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    rpass.draw_indexed(0..diagonal_index_len as u32, 0, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
