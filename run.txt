@@ -1,6 +1,6 @@
 # Desktop
 
-cargo run
+cargo run --bin wgpu-hello
 
 # Web
 
