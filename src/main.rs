@@ -38,7 +38,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         div.append_child(&doc.create_text_node("This app requires WebGPU. Either your browser does not support WebGPU, or you must enable an experimental flag to access it.")).unwrap();
                         body.replace_child(
                             &div,
-                            &web_sys::Element::from(window.canvas()))
+                            &web_sys::Element::from(window.canvas().unwrap()))
                             .ok()
                     })
                     .expect("couldn't append canvas to document body")
@@ -204,7 +204,7 @@ fn main() {
             .and_then(|win| win.document())
             .and_then(|doc| doc.body())
             .and_then(|body| {
-                body.append_child(&web_sys::Element::from(window.canvas()))
+                body.append_child(&web_sys::Element::from(window.canvas().unwrap()))
                     .ok()
             })
             .expect("couldn't append canvas to document body");
