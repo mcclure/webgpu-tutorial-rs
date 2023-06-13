@@ -1,19 +1,19 @@
 # Desktop
 
-cargo run --bin wgpu-hello
+cargo run
 
 # Web
 
-RUSTFLAGS=--cfg=web_sys_unstable_apis wasm-pack build --target web && cp index.html pkg
+RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build
 
 # Web (Windows)
 
-cmd.exe /c "set RUSTFLAGS=--cfg=web_sys_unstable_apis & wasm-pack.exe build --target web && copy index.html pkg"
+cmd.exe /c "set RUSTFLAGS=--cfg=web_sys_unstable_apis & trunk.exe build --release"
 
 # Web (Test)
 
-(cd pkg && http-server -c-1)
+trunk serve
 
 # Web (Deploy)
 
-scp pkg/*.js pkg/*.wasm pkg/*.html pkg/*.css pkg/*.png pkg/*.jpg user@webserver:path/to/www
+scp dist/*.js dist/*.wasm dist/*.html dist/*.css dist/*.png dist/*.jpg user@webserver:path/to/www

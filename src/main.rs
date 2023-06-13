@@ -11,8 +11,6 @@ use winit::{
 };
 
 #[cfg(target_arch="wasm32")]
-use wasm_bindgen::prelude::*;
-#[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
 
 use crate::constants::*;
@@ -186,7 +184,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     });
 }
 
-#[cfg_attr(target_arch="wasm32", wasm_bindgen(start))]
 fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
