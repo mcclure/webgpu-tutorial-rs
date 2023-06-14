@@ -1,3 +1,5 @@
+// Assets for an image of a diagonal slash
+
 use std::mem;
 use wgpu::util::DeviceExt;
 

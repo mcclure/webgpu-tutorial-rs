@@ -1,5 +1,6 @@
 // Entry point
 
+mod boilerplate;
 mod constants;
 mod diagonal;
 
@@ -13,10 +14,13 @@ use winit::{
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
 
+use crate::boilerplate::*;
 use crate::constants::*;
 use crate::diagonal::*;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
+    // ----------------------- Basic setup ----------------------
+
     let size = window.inner_size();
 
     let instance = wgpu::Instance::default();
@@ -71,47 +75,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .await
         .expect("Failed to create device");
 
-    // Content to be drawn
-    let (diagonal_vertex_buffer, diagonal_index_buffer, diagonal_index_len, diagonal_vertex_layout) = make_diagonal_buffers(&device, DEFAULT_STROKE);
-
     // Load the shaders from disk
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
     });
 
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[],
-        push_constant_ranges: &[],
-    });
-
     let swapchain_capabilities = surface.get_capabilities(&adapter);
     let swapchain_format = swapchain_capabilities.formats[0];
-
-    let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: None,
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_plain",
-            buffers: &[diagonal_vertex_layout],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_plain",
-            targets: &[Some(swapchain_format.into())],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Cw,
-            cull_mode: Some(wgpu::Face::Back),
-            ..wgpu::PrimitiveState::default()
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
 
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -124,6 +95,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     surface.configure(&device, &config);
+
+    // ----------------------- Content and pipelines -----------------------
+
+    // Parts for diagonal (will be needed on resize)
+    let (diagonal_vertex_buffer, diagonal_index_buffer, diagonal_index_len, diagonal_vertex_layout) = make_diagonal_buffers(&device, DEFAULT_STROKE);
+
+    let (pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(swapchain_format.into())]);
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
