@@ -8,8 +8,9 @@ use std::borrow::Cow;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::Window,
+    window::Window, dpi::PhysicalSize,
 };
+use divrem::DivCeil;
 
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
@@ -84,30 +85,74 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     let swapchain_capabilities = surface.get_capabilities(&adapter);
     let swapchain_format = swapchain_capabilities.formats[0];
 
-    let mut config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: swapchain_format,
-        width: size.width,
-        height: size.height,
-        present_mode: wgpu::PresentMode::Fifo,
-        alpha_mode: swapchain_capabilities.alpha_modes[0],
-        view_formats: vec![],
-    };
-
-    surface.configure(&device, &config);
-
     // ----------------------- Content and pipelines -----------------------
 
     // Parts for diagonal (will be needed on resize)
     let (diagonal_vertex_buffer, diagonal_index_buffer, diagonal_index_len, diagonal_vertex_layout) = make_diagonal_buffers(&device, DEFAULT_STROKE);
 
-    let (pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(swapchain_format.into())]);
+    // Throw away diagonal pipeline layout, we will not be attaching bind groups
+    let (_, diagonal_render_pipeline) = make_pipeline(&device, &shader, "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(wgpu::TextureFormat::R8Unorm.into())]);
+
+    let mut diagonal_texture:wgpu::Texture;
+
+    let generate_resize = |size:PhysicalSize<u32>| {
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: swapchain_format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: swapchain_capabilities.alpha_modes[0],
+            view_formats: vec![],
+        };
+
+        surface.configure(&device, &config);
+
+        // Decide how big the diagonal texture should be
+        // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
+        let diagonal_texture_side = std::cmp::min(DivCeil::div_ceil(size.height, TILES_ACROSS), DivCeil::div_ceil(size.width, TILES_ACROSS));
+
+        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, &queue, diagonal_texture_side, diagonal_texture_side, "diagonal-texture");
+
+        // Draw into the diagonal texture
+        {
+            let mut diagonal_texture_encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("diagonal-texture-generate") });
+            {
+                let mut rpass = diagonal_texture_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &diagonal_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                            store: true,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                });
+                rpass.set_pipeline(&diagonal_render_pipeline);
+                rpass.set_vertex_buffer(0, diagonal_vertex_buffer.slice(..));
+                rpass.set_index_buffer(diagonal_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                rpass.draw_indexed(0..diagonal_index_len as u32, 0, 0..1);
+            }
+            queue.submit(Some(diagonal_texture_encoder.finish()));
+        }
+
+        diagonal_texture
+    };
+
+    let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, "vs_textured", &[], "fs_textured", &[Some(swapchain_format.into())]);
+
+    let generate_frame = || {()};
+
+    let mut diagonal_texture = generate_resize(size);
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
-        // the resources are properly cleaned up.
-        let _ = (&instance, &adapter, &shader, &pipeline_layout);
+        // the resources do not leak.
+        let _ = (&instance, &adapter, &shader, &render_pipeline_layout);
 
         *control_flow = ControlFlow::Wait;
         match event {
@@ -116,9 +161,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                config.width = size.width;
-                config.height = size.height;
-                surface.configure(&device, &config);
+                diagonal_texture = generate_resize(size);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
