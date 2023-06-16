@@ -95,7 +95,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let mut diagonal_texture:wgpu::Texture;
 
-    let generate_resize = |size:PhysicalSize<u32>| {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline) -> wgpu::Texture {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: swapchain_format,
@@ -112,7 +112,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
         let diagonal_texture_side = std::cmp::min(DivCeil::div_ceil(size.height, TILES_ACROSS), DivCeil::div_ceil(size.width, TILES_ACROSS));
 
-        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, &queue, diagonal_texture_side, diagonal_texture_side, "diagonal-texture");
+        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, "diagonal-texture");
 
         // Draw into the diagonal texture
         {
@@ -140,13 +140,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
 
         diagonal_texture
-    };
+    }
 
     let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, "vs_textured", &[], "fs_textured", &[Some(swapchain_format.into())]);
 
     let generate_frame = || {()};
 
-    let mut diagonal_texture = generate_resize(size);
+    let mut diagonal_texture = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
@@ -161,7 +161,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                diagonal_texture = generate_resize(size);
+                diagonal_texture = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }

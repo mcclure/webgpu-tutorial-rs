@@ -1,6 +1,6 @@
 // Construct WebGPU stuff
 
-pub fn make_texture_gray(device: &wgpu::Device, queue: &wgpu::Queue, width:u32, height:u32, label:&str) -> (wgpu::Texture, wgpu::TextureView) {
+pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, label:&str) -> (wgpu::Texture, wgpu::TextureView) {
 	let texture_descriptor:wgpu::TextureDescriptor = wgpu::TextureDescriptor {
 	    size: wgpu::Extent3d {width:width, height:height, depth_or_array_layers:1},
 	    mip_level_count: 1,
@@ -8,7 +8,7 @@ pub fn make_texture_gray(device: &wgpu::Device, queue: &wgpu::Queue, width:u32, 
 	    dimension: wgpu::TextureDimension::D2,
 	    format: wgpu::TextureFormat::R8Unorm,
 	    usage: wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::COPY_DST),
-	    label: None,
+	    label: Some(label),
 	    view_formats: &[],
 	};
 
