@@ -11,6 +11,7 @@ use winit::{
     window::Window, dpi::PhysicalSize,
 };
 use divrem::DivCeil;
+use wgpu::util::DeviceExt;
 
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
@@ -87,15 +88,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     // ----------------------- Content and pipelines -----------------------
 
+    // ------ Data/operations for init/resize ------
+
     // Parts for diagonal (will be needed on resize)
     let (diagonal_vertex_buffer, diagonal_index_buffer, diagonal_index_len, diagonal_vertex_layout) = make_diagonal_buffers(&device, DEFAULT_STROKE);
 
     // Throw away diagonal pipeline layout, we will not be attaching bind groups
-    let (_, diagonal_render_pipeline) = make_pipeline(&device, &shader, "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(wgpu::TextureFormat::R8Unorm.into())]);
+    let (_, diagonal_render_pipeline) = make_pipeline(&device, &shader, &[], "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(wgpu::TextureFormat::R8Unorm.into())]);
 
-    let mut diagonal_texture:wgpu::Texture;
+    let texture_bind_group_layout = make_texture_bind_group_layout(&device);
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline) -> wgpu::Texture {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
+        // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: swapchain_format,
@@ -107,6 +111,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         };
 
         surface.configure(&device, &config);
+
+        // ------ Diagonal ------
 
         // Decide how big the diagonal texture should be
         // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
@@ -139,14 +145,56 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             queue.submit(Some(diagonal_texture_encoder.finish()));
         }
 
-        diagonal_texture
+        // ------ Grid buffer ------
+
+        // Dummy generation of grid buffer-- In next pass this will be a compute buffer
+        let (side_x, side_y) = (size.width  as f32/diagonal_texture_side as f32/2.,
+                                size.height as f32/diagonal_texture_side as f32/2.);
+
+        let grid_vertex : [f32;16] = [
+            -side_x, -side_y, 0., 0.,
+             side_x, -side_y, 0., 1.,
+            -side_x,  side_y, 1., 0.,
+             side_x,  side_y, 1., 1.,
+        ];
+
+        // Break that down into triangles
+        // Each triangle has the midpoint as a vertex
+        // In next pass this will not be const
+        const GRID_INDEX : [u16;6] = [0, 1, 2,
+                                      1, 2, 3];
+
+        let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid vertex buffer"),
+            contents: bytemuck::cast_slice(&grid_vertex),
+            usage: wgpu::BufferUsages::VERTEX, // Immutable
+        });
+
+        let grid_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid index buffer"),
+            contents: bytemuck::cast_slice(&GRID_INDEX),
+            usage: wgpu::BufferUsages::INDEX, // Immutable
+        });
+
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diagonal_texture),
+                }
+            ],
+            layout: &texture_bind_group_layout,
+            label: Some("grid bind group"),
+        });
+
+        (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group)
     }
 
-    let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, "vs_textured", &[], "fs_textured", &[Some(swapchain_format.into())]);
+    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
 
-    let generate_frame = || {()};
+    // ------ Data/operations for frame draw ------
 
-    let mut diagonal_texture = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
+    let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, &[texture_bind_group], "vs_textured", &[], "fs_textured", &[Some(swapchain_format.into())]);
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
@@ -161,7 +209,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                diagonal_texture = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
+                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }

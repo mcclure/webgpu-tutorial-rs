@@ -1,20 +1,8 @@
 // Assets for an image of a diagonal slash
 
-use std::mem;
 use wgpu::util::DeviceExt;
 
-// "This is an attribute array of Float32 pairs"
-const VEC2_LAYOUT : wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
-    array_stride: (mem::size_of::<f32>()*2) as wgpu::BufferAddress,
-    step_mode: wgpu::VertexStepMode::Vertex,
-    attributes: &[
-        wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x2,
-            offset: 0,
-            shader_location: 0,
-        },
-    ],
-};
+use crate::boilerplate::*;
 
 /*
 	Let's draw a shape... with our MINDS
