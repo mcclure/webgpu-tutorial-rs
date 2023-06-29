@@ -33,6 +33,10 @@ pub const VEC2X2_LAYOUT : wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     ],
 };
 
+pub fn make_sampler(device: &wgpu::Device) -> wgpu::Sampler { // Currently unused
+    device.create_sampler(&wgpu::SamplerDescriptor::default())
+}
+
 pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, target:bool, label:&str) -> (wgpu::Texture, wgpu::TextureView) {
 	let mut usage = wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::COPY_DST);
     if target { usage = usage | wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::RENDER_ATTACHMENT) };
@@ -67,6 +71,12 @@ pub fn make_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupL
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
                 },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                 count: None,
             },
         ],

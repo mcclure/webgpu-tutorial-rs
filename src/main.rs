@@ -98,9 +98,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let texture_bind_group_layout = make_texture_bind_group_layout(&device);
 
+    let default_sampler = make_sampler(&device);
+
     let grid_vertex_buffer_layout = VEC2X2_LAYOUT;
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, texture_bind_group_layout: &wgpu::BindGroupLayout) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, texture_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -183,6 +185,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(&diagonal_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&default_sampler),
                 }
             ],
             layout: &texture_bind_group_layout,
@@ -192,7 +198,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout);
+    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
 
     // ------ Data/operations for frame draw ------
 
@@ -211,7 +217,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout);
+                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }

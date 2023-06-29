@@ -17,6 +17,13 @@ struct Textured {
     @builtin(position) position: vec4<f32>,
 };
 
+@group(0)
+@binding(0)
+var gray: texture_2d<f32>;
+@group(0)
+@binding(1)
+var gray_sampler: sampler;
+
 // Coordinates in NDCs
 @vertex
 fn vs_textured(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2<f32>) -> Textured {
@@ -28,5 +35,6 @@ fn vs_textured(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2
 
 @fragment
 fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
-    return vec4<f32>(vertex.tex_coord, 0.0, 1.0);
+    let value = textureSample(gray, gray_sampler, vertex.tex_coord).r;
+    return vec4(value, value, value, 1.0);
 }
