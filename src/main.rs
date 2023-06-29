@@ -98,7 +98,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let texture_bind_group_layout = make_texture_bind_group_layout(&device);
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
+    let grid_vertex_buffer_layout = VEC2X2_LAYOUT;
+
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, texture_bind_group_layout: &wgpu::BindGroupLayout) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -118,7 +120,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
         let diagonal_texture_side = std::cmp::min(DivCeil::div_ceil(size.height, TILES_ACROSS), DivCeil::div_ceil(size.width, TILES_ACROSS));
 
-        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, "diagonal-texture");
+        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, true, "diagonal-texture");
 
         // Draw into the diagonal texture
         {
@@ -148,8 +150,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // ------ Grid buffer ------
 
         // Dummy generation of grid buffer-- In next pass this will be a compute buffer
-        let (side_x, side_y) = (size.width  as f32/diagonal_texture_side as f32/2.,
-                                size.height as f32/diagonal_texture_side as f32/2.);
+        let (side_x, side_y) = (diagonal_texture_side as f32/size.width  as f32/2.,
+                                diagonal_texture_side as f32/size.height as f32/2.);
 
         let grid_vertex : [f32;16] = [
             -side_x, -side_y, 0., 0.,
@@ -161,7 +163,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // Break that down into triangles
         // Each triangle has the midpoint as a vertex
         // In next pass this will not be const
-        const GRID_INDEX : [u16;6] = [0, 1, 2,
+        const GRID_INDEX : [u16;6] = [0, 2, 1,
                                       1, 2, 3];
 
         let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -180,7 +182,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diagonal_texture),
+                    resource: wgpu::BindingResource::TextureView(&diagonal_view),
                 }
             ],
             layout: &texture_bind_group_layout,
@@ -190,11 +192,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
+    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout);
 
     // ------ Data/operations for frame draw ------
 
-    let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, &[texture_bind_group], "vs_textured", &[], "fs_textured", &[Some(swapchain_format.into())]);
+    let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, &[&texture_bind_group_layout], "vs_textured", &[grid_vertex_buffer_layout], "fs_textured", &[Some(swapchain_format.into())]);
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
@@ -209,7 +211,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline);
+                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
@@ -236,9 +238,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         depth_stencil_attachment: None,
                     });
                     rpass.set_pipeline(&render_pipeline);
-                    rpass.set_vertex_buffer(0, diagonal_vertex_buffer.slice(..));
-                    rpass.set_index_buffer(diagonal_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    rpass.draw_indexed(0..diagonal_index_len as u32, 0, 0..1);
+                    rpass.set_vertex_buffer(0, grid_vertex_buffer.slice(..));
+                    rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    rpass.set_bind_group(0, &texture_bind_group, &[]);
+                    rpass.draw_indexed(0..6, 0, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
