@@ -153,15 +153,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // ------ Grid buffer ------
 
         // Dummy generation of grid buffer-- In next pass this will be a compute buffer
-        let (side_x, side_y) = (diagonal_texture_side as f32/size.width  as f32/2.,
-                                diagonal_texture_side as f32/size.height as f32/2.);
+        let (side_x, side_y) = (diagonal_texture_side as f32/size.width  as f32,
+                                diagonal_texture_side as f32/size.height as f32);
 
         // Vertices of one square
         let grid_vertex_base : [f32;16] = [
-            -side_x, -side_y, 0., 0.,
-             side_x, -side_y, 0., 1.,
-            -side_x,  side_y, 1., 0.,
-             side_x,  side_y, 1., 1.,
+            -side_x/2., -side_y/2., 0., 0.,
+             side_x/2., -side_y/2., 0., 1.,
+            -side_x/2.,  side_y/2., 1., 0.,
+             side_x/2.,  side_y/2., 1., 1.,
         ];
 
 
@@ -174,20 +174,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         let mut grid_vertex:Vec<f32> = Default::default();
         let mut grid_index:Vec<u16> = Default::default();
 
-        let (across_x, across_y) = (21, 21);
-        let (offset_x, offset_y) = (-across_x as f32*side_x/2.,
-                                    -across_y as f32*side_y/2.);
+        let (across_x, across_y) = ((2./side_x).ceil() as i64,
+                                    (2./side_y).ceil() as i64);
+        let (offset_x, offset_y) = ((across_x as f32-1.)*side_x/2.,
+                                    (across_y as f32-1.)*side_y/2.);
         {
             let mut index_offset:u16 = 0;
             let mut rng = rand::thread_rng();
             for y in 0..across_y {
                 for x in 0..across_x {
+                    let flip = rng.gen::<bool>();
                     for idx in 0..16 {
                         let mut value = grid_vertex_base[idx];
                         match idx%4 {
-                            0 => { value = value + (offset_x + x as f32*side_x)*2.; }
-                            1 => { value = value - (offset_y + y as f32*side_y)*2.; }
-                            2 => { if rng.gen::<bool>() { value = 1. - value } }
+                            0 => { value = value - offset_x + x as f32*side_x; }
+                            1 => { value = value + offset_y - y as f32*side_y; }
+                            2 => { if flip { value = 1. - value } }
                             _ => ()
                         }
                         grid_vertex.push(value);
@@ -200,8 +202,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 }
             }
         }
-
-//        let (across_x, across_y) = ( (1./side_x).ceil(), (1./side_y).ceil() );
 
         let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid vertex buffer"),
