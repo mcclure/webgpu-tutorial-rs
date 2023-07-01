@@ -102,7 +102,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let grid_vertex_buffer_layout = VEC2X2_LAYOUT;
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, texture_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, texture_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler) -> (u32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -155,18 +155,50 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         let (side_x, side_y) = (diagonal_texture_side as f32/size.width  as f32/2.,
                                 diagonal_texture_side as f32/size.height as f32/2.);
 
-        let grid_vertex : [f32;16] = [
+        // Vertices of one square
+        let grid_vertex_base : [f32;16] = [
             -side_x, -side_y, 0., 0.,
              side_x, -side_y, 0., 1.,
             -side_x,  side_y, 1., 0.,
              side_x,  side_y, 1., 1.,
         ];
 
+
         // Break that down into triangles
         // Each triangle has the midpoint as a vertex
         // In next pass this will not be const
-        const GRID_INDEX : [u16;6] = [0, 2, 1,
-                                      1, 2, 3];
+        const GRID_INDEX_BASE : [u16;6] = [0, 2, 1,
+                                           1, 2, 3];
+
+        let mut grid_vertex:Vec<f32> = Default::default();
+        let mut grid_index:Vec<u16> = Default::default();
+
+        let (across_x, across_y) = (22, 22);
+        let (offset_x, offset_y) = (-across_x as f32*side_x/2.,
+                                    -across_y as f32*side_y/2.);
+        {
+            let mut index_offset:u16 = 0;
+            for y in 0..across_y {
+                for x in 0..across_x {
+                    for idx in 0..16 {
+                        let mut value = grid_vertex_base[idx];
+                        match idx%4 {
+                            0 => { value = value +  offset_x + x as f32*side_x ; }
+                            1 => { value = value - (offset_y + y as f32*side_y); }
+                            _ => ()
+                        }
+                        grid_vertex.push(value);
+                    }
+                    for idx in 0..6 {
+                        let value = GRID_INDEX_BASE[idx] + index_offset*3;
+                        grid_index.push(value);
+                    }
+                    index_offset += 1;
+                }
+            }
+        }
+
+//        let (across_x, across_y) = ( (1./side_x).ceil(), (1./side_y).ceil() );
 
         let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid vertex buffer"),
@@ -176,7 +208,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         let grid_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid index buffer"),
-            contents: bytemuck::cast_slice(&GRID_INDEX),
+            contents: bytemuck::cast_slice(&grid_index),
             usage: wgpu::BufferUsages::INDEX, // Immutable
         });
 
@@ -195,10 +227,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             label: Some("grid bind group"),
         });
 
-        (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group)
+        (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, grid_index.len() as u32, texture_bind_group)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
+    let (mut diagonal_texture_side, mut diagonal_texture, mut grid_vertex_buffer, mut grid_index_buffer, mut grid_index_len, mut texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
 
     // ------ Data/operations for frame draw ------
 
@@ -217,7 +249,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
+                (diagonal_texture_side, diagonal_texture, grid_vertex_buffer, grid_index_buffer, grid_index_len, texture_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &texture_bind_group_layout, &default_sampler);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
@@ -247,7 +279,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     rpass.set_vertex_buffer(0, grid_vertex_buffer.slice(..));
                     rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     rpass.set_bind_group(0, &texture_bind_group, &[]);
-                    rpass.draw_indexed(0..6, 0, 0..1);
+                    rpass.draw_indexed(0..grid_index_len, 0, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
