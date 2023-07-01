@@ -12,6 +12,7 @@ use winit::{
 };
 use divrem::DivCeil;
 use wgpu::util::DeviceExt;
+use rand::Rng;
 
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
@@ -173,24 +174,26 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         let mut grid_vertex:Vec<f32> = Default::default();
         let mut grid_index:Vec<u16> = Default::default();
 
-        let (across_x, across_y) = (22, 22);
+        let (across_x, across_y) = (21, 21);
         let (offset_x, offset_y) = (-across_x as f32*side_x/2.,
                                     -across_y as f32*side_y/2.);
         {
             let mut index_offset:u16 = 0;
+            let mut rng = rand::thread_rng();
             for y in 0..across_y {
                 for x in 0..across_x {
                     for idx in 0..16 {
                         let mut value = grid_vertex_base[idx];
                         match idx%4 {
-                            0 => { value = value +  offset_x + x as f32*side_x ; }
-                            1 => { value = value - (offset_y + y as f32*side_y); }
+                            0 => { value = value + (offset_x + x as f32*side_x)*2.; }
+                            1 => { value = value - (offset_y + y as f32*side_y)*2.; }
+                            2 => { if rng.gen::<bool>() { value = 1. - value } }
                             _ => ()
                         }
                         grid_vertex.push(value);
                     }
                     for idx in 0..6 {
-                        let value = GRID_INDEX_BASE[idx] + index_offset*3;
+                        let value = GRID_INDEX_BASE[idx] + index_offset*4;
                         grid_index.push(value);
                     }
                     index_offset += 1;
