@@ -155,7 +155,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                 diagonal_texture_side as f32/size.height as f32);
 
         // Vertices of one square
-        let GRID_VERTEX_BASE : [f32;8] = [
+        const GRID_VERTEX_BASE : [f32;8] = [
             -1./2., -1./2.,
              1./2., -1./2.,
             -1./2.,  1./2.,
@@ -223,8 +223,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         // Upload grid vertex buffer
         let grid_uv_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grid vertex buffer"),
-            contents: bytemuck::cast_slice(&grid_vertex),
+            label: Some("Grid uv buffer"),
+            contents: bytemuck::cast_slice(&grid_uv),
             usage: wgpu::BufferUsages::VERTEX, // Immutable
         });
 
