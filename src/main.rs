@@ -321,7 +321,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             label: Some("Row shift bind group")
         });
 
-        let pair:[u32;1] = [across_x.try_into().unwrap()];
+        let pair:[u32;1] = [(across_x*8).try_into().unwrap()]; // 2 because we copy floats not [f32;4]s
         queue.write_buffer(&rowshift_uniform_buffer, 0, bytemuck::cast_slice(&pair));
 
         (diagonal_texture_side, side_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group)
