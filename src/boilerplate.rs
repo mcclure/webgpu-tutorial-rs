@@ -73,27 +73,30 @@ pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, target:bo
     (texture, view)
 }
 
-pub fn make_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn make_texture_bind_group_layout(device: &wgpu::Device, additional:&[wgpu::BindGroupLayoutEntry]) -> wgpu::BindGroupLayout {
+    let mut entries = vec![
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false }, /* FIXME: Is nearest a filter? */
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        }
+    ];
+    entries.extend_from_slice(additional);
+
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("single bind group layout"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false }, /* FIXME: Is nearest a filter? */
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                count: None,
-            },
-        ],
+        entries: entries.as_slice(),
     })
 }
 
