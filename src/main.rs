@@ -72,7 +72,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 label: None,
                 features: wgpu::Features::empty(),
                 // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-                limits: wgpu::Limits::downlevel_webgl2_defaults()
+                limits: wgpu::Limits::downlevel_defaults()
                     .using_resolution(adapter.limits()),
             },
             None,
@@ -111,16 +111,49 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             count: None,
         }]);
 
+    let rowshift_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Row shift bind group layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage {read_only:false},
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new((mem::size_of::<f32>()) as u64),
+                },
+                count: None
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new((mem::size_of::<f32>()) as u64),
+                },
+                count: None
+            },
+        ]
+    });
+
     let default_sampler = make_sampler(&device);
 
-    const ZERO_ZERO: [f32; 2] = [0.,0.];
+    const ZERO_ZERO_F32: [f32; 2] = [0.,0.];
     let grid_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Grid Uniform Buffer"),
-        contents: bytemuck::cast_slice(&ZERO_ZERO),
+        contents: bytemuck::cast_slice(&ZERO_ZERO_F32),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer) -> (u32, f32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup) {
+    const ZERO_U32: [u32; 1] = [0];
+    let rowshift_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Row shift shift Uniform Buffer"),
+        contents: bytemuck::cast_slice(&ZERO_U32),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer) -> (u32, f32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -244,7 +277,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         let grid_uv_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid uv buffer"),
             contents: bytemuck::cast_slice(&grid_uv),
-            usage: wgpu::BufferUsages::VERTEX, // Immutable
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE, // Immutable
         });
 
         // Upload grid index buffer
@@ -273,14 +306,39 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             label: Some("grid bind group"),
         });
 
-        (diagonal_texture_side, side_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group)
+        let rowshift_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: grid_uv_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: rowshift_uniform_buffer.as_entire_binding(),
+                },
+            ],
+            layout: &rowshift_bind_group_layout,
+            label: Some("Row shift bind group")
+        });
+
+        let pair:[u32;1] = [across_x.try_into().unwrap()];
+        queue.write_buffer(&rowshift_uniform_buffer, 0, bytemuck::cast_slice(&pair));
+
+        (diagonal_texture_side, side_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer);
+    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer);
 
     // ------ Data/operations for frame draw ------
 
     let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, &[&grid_bind_group_layout], "vs_textured", &[VEC2_LAYOUT, VEC2_LAYOUT_LOCATION_1], "fs_textured", &[Some(swapchain_format.into())]);
+
+    let rowshift_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Row shift pipeline"),
+        layout: None,
+        module: &shader,
+        entry_point: "internal_copy",
+    });
 
     let mut grid_last_reset = Instant::now();
     let mut grid_last_reset_overflow = 0.;
@@ -298,11 +356,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer);
+                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
                 {
                     let grid_current = Instant::now();
                     let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
@@ -310,6 +371,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         grid_time_offset %=  1.; // FIXME: What if it's more than 2?
                         grid_last_reset = grid_current;
                         grid_last_reset_overflow = grid_time_offset;
+
+                        {
+                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                            cpass.set_pipeline(&rowshift_pipeline);
+                            cpass.set_bind_group(0, &rowshift_bind_group, &[]);
+                            cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
+                        }
+                        println!("!!!");
                     }
                     let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
                     queue.write_buffer(&grid_uniform_buffer, 0, bytemuck::cast_slice(&pair));
@@ -321,8 +390,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let view = frame
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
-                let mut encoder =
-                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 {
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,

@@ -95,7 +95,7 @@ pub fn make_texture_bind_group_layout(device: &wgpu::Device, additional:&[wgpu::
     entries.extend_from_slice(additional);
 
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("single bind group layout"),
+        label: Some("Texture bind group layout"),
         entries: entries.as_slice(),
     })
 }
