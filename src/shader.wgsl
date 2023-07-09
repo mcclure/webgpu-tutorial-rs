@@ -24,11 +24,15 @@ var gray: texture_2d<f32>;
 @binding(1)
 var gray_sampler: sampler;
 
+@group(0)
+@binding(2)
+var<uniform> offset: vec2<f32>;
+
 // Coordinates in NDCs
 @vertex
 fn vs_textured(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2<f32>) -> Textured {
 	var result: Textured;
-	result.position = vec4(v_position, 0., 1.);
+	result.position = vec4(v_position + offset, 0., 1.);
 	result.tex_coord = v_texcoord;
     return result;
 }
