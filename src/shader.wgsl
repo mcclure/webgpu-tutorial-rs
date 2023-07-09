@@ -42,3 +42,23 @@ fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     let value = textureSample(gray, gray_sampler, vertex.tex_coord).r;
     return vec4(value, value, value, 1.0);
 }
+
+// Compute shaders
+
+@group(0)
+@binding(0)
+var<storage, read_write> internal_copy_buffer: array<f32>;
+
+@group(0)
+@binding(1)
+var<uniform> internal_copy_stride: u32;
+
+@compute
+@workgroup_size(1)
+fn internal_copy(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var limit = arrayLength(internal_copy_buffer)-internal_copy_stride;
+    for(var idx = 0u; idx < limit; idx++) {
+        internal_copy_buffer[idx] = internal_copy_buffer[idx+internal_copy_stride];
+    }
+}
+
