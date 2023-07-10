@@ -153,6 +153,27 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
+    fn random_uv_push(grid_uv: &mut Vec<f32>, square_count:usize) {
+        let mut rng = rand::thread_rng();
+
+        const GRID_UV_BASE: [f32;8] = [
+            0., 0.,
+            0., 1.,
+            1., 0.,
+            1., 1.,
+        ];
+
+        for _ in 0..square_count {
+            let flip = rng.gen::<bool>();
+            for idx in 0..8 {
+                let mut value = GRID_UV_BASE[idx];
+                if 0==idx%2 && flip { value = 1. - value }
+                grid_uv.push(value);
+            }
+        }
+    }
+
+
     fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer) -> (u32, f32, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
@@ -213,12 +234,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             -1./2.,  1./2.,
              1./2.,  1./2.,
         ];
-        const GRID_UV_BASE : [f32;8] = [
-            0., 0.,
-            0., 1.,
-            1., 0.,
-            1., 1.,
-        ];
 
         // Break that down into triangles
         // Each triangle has the midpoint as a vertex
@@ -237,10 +252,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     (across_y as f32-1.)*side_y/2.);
         {
             let mut index_offset:u16 = 0;
-            let mut rng = rand::thread_rng();
             for y in 0..across_y {
                 for x in 0..across_x {
-                    let flip = rng.gen::<bool>();
                     for idx in 0..8 {
                         {
                             let mut value = GRID_VERTEX_BASE[idx];
@@ -251,11 +264,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             }
                             grid_vertex.push(value);
                         }
-                        {
-                            let mut value = GRID_UV_BASE[idx];
-                            if 0==idx%2 && flip { value = 1. - value }
-                            grid_uv.push(value);
-                        }
                     }
                     for idx in 0..6 {
                         let value = GRID_INDEX_BASE[idx] + index_offset*4;
@@ -265,6 +273,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 }
             }
         }
+
+        random_uv_push(&mut grid_uv, (across_y*across_x) as usize);
 
         // Upload grid vertex buffer
         let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
