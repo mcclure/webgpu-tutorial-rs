@@ -247,9 +247,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         // Fill out grid vertex buffer
         let (across_x, across_y) = ((2./side_x).ceil() as i64,
-                                    (2./side_y).ceil() as i64);
+                                    (2./side_y).ceil() as i64 + 1);
         let (offset_x, offset_y) = ((across_x as f32-1.)*side_x/2.,
-                                    (across_y as f32-1.)*side_y/2.);
+                                    1.-side_y/2.);
         {
             let mut index_offset:u16 = 0;
             for y in 0..across_y {
