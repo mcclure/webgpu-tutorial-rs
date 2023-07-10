@@ -371,9 +371,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
-                let mut encoder =
-                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
                 {
                     let grid_current = Instant::now();
                     let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
@@ -382,12 +379,16 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         grid_last_reset = grid_current;
                         grid_last_reset_overflow = grid_time_offset;
 
+                        let mut encoder =
+                            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                         {
                             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
                             cpass.set_pipeline(&rowshift_pipeline);
                             cpass.set_bind_group(0, &rowshift_bind_group, &[]);
                             cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
                         }
+                        queue.submit(Some(encoder.finish()));
+
                         {
                             let mut row:Vec<f32> = Default::default();
                             random_uv_push(&mut row, diagonal_texture_count_x as usize);
@@ -406,6 +407,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let view = frame
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 {
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,
