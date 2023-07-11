@@ -345,7 +345,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let rowshift_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Row shift pipeline"),
-        layout: None,
+        layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Row shift pipeline layout"),
+            bind_group_layouts:&[&rowshift_bind_group_layout],
+            push_constant_ranges:&[]
+        })),
         module: &shader,
         entry_point: "internal_copy",
     });
