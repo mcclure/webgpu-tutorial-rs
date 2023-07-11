@@ -1,0 +1,3 @@
+[build]
+# Make wasm file links relative
+public_url = "./"

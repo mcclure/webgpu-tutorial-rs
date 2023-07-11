@@ -6,7 +6,7 @@ mod diagonal;
 
 use std::mem;
 use std::borrow::Cow;
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},

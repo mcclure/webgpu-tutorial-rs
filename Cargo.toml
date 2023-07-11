@@ -11,6 +11,7 @@ divrem = "1.0.0"
 env_logger = "0.10.0"
 log = "0.4.17"
 pollster = "0.3.0"
+web-time = "0.2.0"
 wgpu = "0.16.2"
 winit = "0.29.0-beta.0"
 
@@ -31,9 +32,6 @@ opt-level = 'z'     # Optimize for size
 lto = true          # Enable link-time optimization
 codegen-units = 1   # Reduce number of codegen units to increase optimizations
 panic = 'abort'     # Abort on panic
+
+# To build for Twiggy space profiler, comment this out and add [build]release=false to Trunk.toml
 strip = true        # Strip symbols from binary
-
-# To build for Twiggy space profiler, uncomment these and run wasm-pack with --dev instead of --target web
-#[package.metadata.wasm-pack.profile.release]
-#wasm-opt = ['-g', '-O']
-
