@@ -5,7 +5,7 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies] 
+[dependencies]
 bytemuck = "1.13.1"
 divrem = "1.0.0"
 env_logger = "0.10.0"
@@ -15,11 +15,11 @@ web-time = "0.2.0"
 wgpu = "0.16.2"
 winit = "0.29.0-beta.0"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies] 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3.61", features = ["Document", "Text"] }
 console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
-wasm-bindgen-futures = "0.4.34" 
+wasm-bindgen-futures = "0.4.34"
 wasm-bindgen = "0.2.84"
 rand = { version = "0.8.5", features = ["alloc", "getrandom", "libc", "std", "std_rng"], default-features = false }
 getrandom = { version = "0.2.9", features = ["js"] }
