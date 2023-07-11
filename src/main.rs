@@ -359,7 +359,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // the resources do not leak.
         let _ = (&instance, &adapter, &shader, &render_pipeline_layout);
 
-        *control_flow = ControlFlow::Wait;
+        // Request continuous animation
+        *control_flow = if cfg!(feature = "metal-auto-capture") {
+            ControlFlow::Exit
+        } else {
+            ControlFlow::Poll
+        };
+
         match event {
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
@@ -394,7 +400,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             random_uv_push(&mut row, diagonal_texture_count_x as usize);
                             queue.write_buffer(&grid_uv_buffer, diagonal_texture_count_x*(diagonal_texture_count_y-1)*8*mem::size_of::<f32>() as u64, bytemuck::cast_slice(&row));
                         }
-                        println!("!!!");
                     }
 
                     let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
@@ -432,8 +437,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 queue.submit(Some(encoder.finish()));
                 frame.present();
-
-                window.request_redraw();
+            }
+            // The winit docs recommend doing your "state update" in MainEventsCleared and your draw triggering/logic here.
+            Event::RedrawEventsCleared => {
+                window.request_redraw()
             }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
