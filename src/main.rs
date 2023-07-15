@@ -119,7 +119,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
-                min_binding_size: wgpu::BufferSize::new((mem::size_of::<f32>()*1) as u64),
+                min_binding_size: wgpu::BufferSize::new((mem::size_of::<f32>()*2) as u64),
             },
             count: None,
         }], "Target");
@@ -373,7 +373,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             let blur_scale = (BLUR_SCALE_BASE << (stage/2)) as f32;
             let target_buffer_contents: [f32; 2] =
                 if 0==stage%2 { [blur_scale/size.width as f32, 0.] }
-                else          { [0., blur_scale/size.width as f32] };
+                else          { [0., blur_scale/size.height as f32] };
             queue.write_buffer(&target_uniform_buffers[stage], 0, bytemuck::cast_slice(&target_buffer_contents));
         }
 
