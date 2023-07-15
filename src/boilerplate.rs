@@ -29,8 +29,7 @@ pub const VEC2_LAYOUT_LOCATION_1 : wgpu::VertexBufferLayout = wgpu::VertexBuffer
 };
 
 // "This is an attribute array of Float32 pair pairs"
-// Currently unused
-pub const _VEC2X2_LAYOUT : wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
+pub const VEC2X2_LAYOUT : wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     array_stride: (mem::size_of::<f32>()*4) as wgpu::BufferAddress,
     step_mode: wgpu::VertexStepMode::Vertex,
     attributes: &[
@@ -73,7 +72,7 @@ pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, target:bo
     (texture, view)
 }
 
-pub fn make_texture_bind_group_layout(device: &wgpu::Device, additional:&[wgpu::BindGroupLayoutEntry]) -> wgpu::BindGroupLayout {
+pub fn make_texture_bind_group_layout(device: &wgpu::Device, additional:&[wgpu::BindGroupLayoutEntry], labelTag:&str) -> wgpu::BindGroupLayout {
     let mut entries = vec![
         wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -95,20 +94,20 @@ pub fn make_texture_bind_group_layout(device: &wgpu::Device, additional:&[wgpu::
     entries.extend_from_slice(additional);
 
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Texture bind group layout"),
+        label: Some(&format!("{} texture bind group layout", labelTag)),
         entries: entries.as_slice(),
     })
 }
 
-pub fn make_pipeline(device: &wgpu::Device, shader: &wgpu::ShaderModule, bind_groups:&[&wgpu::BindGroupLayout], vertex_entry: &str, vertex_buffers:&[wgpu::VertexBufferLayout], fragment_entry:&str, fragment_targets:&[Option<wgpu::ColorTargetState>]) -> (wgpu::PipelineLayout, wgpu::RenderPipeline) {
+pub fn make_pipeline(device: &wgpu::Device, shader: &wgpu::ShaderModule, bind_groups:&[&wgpu::BindGroupLayout], vertex_entry: &str, vertex_buffers:&[wgpu::VertexBufferLayout], fragment_entry:&str, fragment_targets:&[Option<wgpu::ColorTargetState>], labelTag:&str) -> (wgpu::PipelineLayout, wgpu::RenderPipeline) {
 	let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
+        label: Some(&format!("{} pipeline layout", labelTag)),
         bind_group_layouts: bind_groups,
         push_constant_ranges: &[],
     });
 
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: None,
+        label: Some(&format!("{} pipeline", labelTag)),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &shader,

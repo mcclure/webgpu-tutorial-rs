@@ -28,6 +28,8 @@ pub fn make_diagonal_buffers(device: &wgpu::Device, stroke:f32) -> (wgpu::Buffer
 
 	// Break that down into triangles
 	// Each triangle has the midpoint as a vertex
+    // Notice a quirk: Every pass drawn in main.rs uses Y-up, but this uses Y-down,
+    // so this triangle winding is reversed from the index buffer in main.rs.
 	const DIAG_INDEX : [u16;18] = [0, 1, 3,
 	                               0, 3, 2,
 	                               1, 4, 3,

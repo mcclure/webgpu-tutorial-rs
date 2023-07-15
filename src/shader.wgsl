@@ -31,6 +31,14 @@ var<uniform> offset: vec2<f32>;
 // Coordinates in NDCs
 @vertex
 fn vs_textured(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2<f32>) -> Textured {
+    var result: Textured;
+    result.position = vec4(v_position, 0., 1.);
+    result.tex_coord = v_texcoord;
+    return result;
+}
+
+@vertex
+fn vs_textured_offset(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2<f32>) -> Textured {
 	var result: Textured;
 	result.position = vec4(v_position + offset, 0., 1.);
 	result.tex_coord = v_texcoord;
@@ -41,6 +49,13 @@ fn vs_textured(@location(0) v_position: vec2<f32>, @location(1) v_texcoord: vec2
 fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     let value = textureSample(gray, gray_sampler, vertex.tex_coord).r;
     return vec4(value, value, value, 1.0);
+}
+
+// To test postprocess shaders
+@fragment
+fn fs_postprocess1(vertex: Textured) -> @location(0) vec4<f32> {
+    let value = textureSample(gray, gray_sampler, vertex.tex_coord).r;
+    return vec4(1.0-value, value, value, 1.0);
 }
 
 // Compute shaders
