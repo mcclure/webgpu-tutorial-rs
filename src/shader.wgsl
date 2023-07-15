@@ -51,11 +51,11 @@ fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     return vec4(value, value, value, 1.0);
 }
 
-// To test postprocess shaders
+// To test postprocess shaders, invert
 @fragment
 fn fs_postprocess1(vertex: Textured) -> @location(0) vec4<f32> {
-    let value = textureSample(gray, gray_sampler, vertex.tex_coord).r;
-    return vec4(1.0-value, value, value, 1.0);
+    let value = 1.0 - textureSample(gray, gray_sampler, vertex.tex_coord).r;
+    return vec4(value, value, value, 1.0);
 }
 
 // Compute shaders
