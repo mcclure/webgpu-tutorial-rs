@@ -68,8 +68,8 @@ const OFFSET2 = 3.2307692308;
 @binding(2)
 var<uniform> blur_resolution: f32;
 
-fn separable_blur(uv:vec2<f32>, blurDirection:vec2<f32>) -> f32 {
-    var blurVector = blurDirection*blur_resolution;
+fn separable_blur(uv:vec2<f32>) -> f32 {
+    var blurVector = blur_resolution;
     var color = 0.0;
     color += textureSample(gray, gray_sampler, uv).r * WEIGHT0;
     color += textureSample(gray, gray_sampler, uv + blurVector * OFFSET1).r * WEIGHT1;
@@ -81,15 +81,17 @@ fn separable_blur(uv:vec2<f32>, blurDirection:vec2<f32>) -> f32 {
 
 // Postprocess x component
 @fragment
-fn fs_postprocess1(vertex: Textured) -> @location(0) vec4<f32> {
-    let value = separable_blur(vertex.tex_coord, vec2<f32>(1.0, 0.0));
+fn fs_postprocess_blur(vertex: Textured) -> @location(0) vec4<f32> {
+    let value = separable_blur(vertex.tex_coord);
     return vec4(value, value, value, 1.0);
 }
 
 // Postprocess y component
 @fragment
-fn fs_postprocess2(vertex: Textured) -> @location(0) vec4<f32> {
-    let value = separable_blur(vertex.tex_coord, vec2<f32>(0.0, 1.0));
+fn fs_postprocess_blur_threshold(vertex: Textured) -> @location(0) vec4<f32> {
+    let value = separable_blur(vertex.tex_coord);
+    //var value = 0.0;
+    //if (prevalue > 0.65) { value = 1.0; }
     return vec4(value, value, value, 1.0);
 }
 
