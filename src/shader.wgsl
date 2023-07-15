@@ -79,10 +79,17 @@ fn separable_blur(uv:vec2<f32>, blurDirection:vec2<f32>) -> f32 {
     return color;
 }
 
-// To test postprocess shaders, invert
+// Postprocess x component
 @fragment
 fn fs_postprocess1(vertex: Textured) -> @location(0) vec4<f32> {
     let value = separable_blur(vertex.tex_coord, vec2<f32>(1.0, 0.0));
+    return vec4(value, value, value, 1.0);
+}
+
+// Postprocess y component
+@fragment
+fn fs_postprocess2(vertex: Textured) -> @location(0) vec4<f32> {
+    let value = separable_blur(vertex.tex_coord, vec2<f32>(0.0, 1.0));
     return vec4(value, value, value, 1.0);
 }
 

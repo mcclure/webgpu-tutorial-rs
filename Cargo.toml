@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 bytemuck = "1.13.1"
+cpal = "0.15.2"
 divrem = "1.0.0"
 env_logger = "0.10.0"
 log = "0.4.17"
 pollster = "0.3.0"
+realfft = "3.3.0"
 web-time = "0.2.0"
 wgpu = "0.16.2"
 winit = "0.29.0-beta.0"
