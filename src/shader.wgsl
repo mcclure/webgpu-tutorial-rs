@@ -51,10 +51,38 @@ fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     return vec4(value, value, value, 1.0);
 }
 
+// This one-dimensional separable blur filter samples five points and averages them by different amounts.
+// If we do it on two separate axes, we get a 2d blur.
+// Weights and offsets taken from http://rastergrid.com/blog/2010/09/efficient-gaussian-blur-with-linear-sampling/
+
+// The weights for the center, one-point-out, and two-point-out samples
+const WEIGHT0 = 0.2270270270;
+const WEIGHT1 = 0.3162162162;
+const WEIGHT2 = 0.0702702703;
+
+// The distances-from-center for the samples
+const OFFSET1 = 1.3846153846;
+const OFFSET2 = 3.2307692308;
+
+@group(0)
+@binding(2)
+var<uniform> blur_resolution: f32;
+
+fn separable_blur(uv:vec2<f32>, blurDirection:vec2<f32>) -> f32 {
+    var blurVector = blurDirection*blur_resolution;
+    var color = 0.0;
+    color += textureSample(gray, gray_sampler, uv).r * WEIGHT0;
+    color += textureSample(gray, gray_sampler, uv + blurVector * OFFSET1).r * WEIGHT1;
+    color += textureSample(gray, gray_sampler, uv - blurVector * OFFSET1).r * WEIGHT1;
+    color += textureSample(gray, gray_sampler, uv + blurVector * OFFSET2).r * WEIGHT2;
+    color += textureSample(gray, gray_sampler, uv - blurVector * OFFSET2).r * WEIGHT2;
+    return color;
+}
+
 // To test postprocess shaders, invert
 @fragment
 fn fs_postprocess1(vertex: Textured) -> @location(0) vec4<f32> {
-    let value = 1.0 - textureSample(gray, gray_sampler, vertex.tex_coord).r;
+    let value = separable_blur(vertex.tex_coord, vec2<f32>(1.0, 0.0));
     return vec4(value, value, value, 1.0);
 }
 

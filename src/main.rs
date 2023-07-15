@@ -359,6 +359,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         let target1_bind_group = texture_bind_group(&target1_view, &target1_uniform_buffer, &target_bind_group_layout, "target1 bind group");
 
+        let target1_buffer: [f32; 1] = [2./size.width as f32];
+        queue.write_buffer(&target1_uniform_buffer, 0, bytemuck::cast_slice(&target1_buffer));
+
         (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, target1_view, target1_bind_group)
     }
 
