@@ -90,7 +90,7 @@ fn fs_postprocess_blur(vertex: Textured) -> @location(0) vec4<f32> {
 @fragment
 fn fs_postprocess_blur_threshold(vertex: Textured) -> @location(0) vec4<f32> {
     let prevalue = separable_blur(vertex.tex_coord);
-    var value = smoothstep(prevalue, 0.5, 0.75);
+    var value = smoothstep(0.6, 0.7, prevalue); // .4, .5 are also interesting. TODO scale to size of window
 //    if (prevalue > 0.65) { value = 1.0; }
     return vec4(value, value, value, 1.0);
 }
