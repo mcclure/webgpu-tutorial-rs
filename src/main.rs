@@ -1,5 +1,6 @@
 // Entry point
 
+mod audio;
 mod boilerplate;
 mod constants;
 mod diagonal;
@@ -556,6 +557,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
+    let audio = crate::audio::audio_spawn();
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
