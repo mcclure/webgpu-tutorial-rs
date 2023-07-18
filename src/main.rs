@@ -5,9 +5,10 @@ mod constants;
 mod diagonal;
 
 use std::array;
-use std::ops::DerefMut;
-use std::mem;
 use std::borrow::Cow;
+use std::mem;
+use std::num::NonZeroU64;
+use std::ops::DerefMut;
 use web_time::{Duration, Instant};
 use winit::{
     event::{Event, WindowEvent},
@@ -204,7 +205,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES]) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::Buffer, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES]) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES]) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES]) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -254,6 +255,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // ------ Grid buffer ------
 
         // Dummy generation of grid buffer-- In next pass this will be a compute buffer
+        // FIXME: side_x needs a min(2)
         let (side_x, side_y) = (diagonal_texture_side as f32/size.width  as f32,
                                 diagonal_texture_side as f32/size.height as f32);
 
@@ -327,14 +329,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
         grid_uv_buffer.unmap();
 
-        // Create a buffer for staging copies into the grid uv buffer.
-        // It's the size of just one row of the grid uv buffer, and we don't care its initial value.
-        let staging_uv_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Staging uv buffer"),
-            size: across_x as u64*8*mem::size_of::<f32>() as u64,
-            mapped_at_creation: false,
-            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC, // Mutable, can be written by map operations, can be copied from
-        });
+        let grid_uv_staging_size = across_x as u64*8*mem::size_of::<f32>() as u64;
+        let grid_uv_staging_belt = wgpu::util::StagingBelt::new(grid_uv_staging_size);
+        let grid_uv_staging_offset = grid_uv_staging_size*(across_y as u64-1);
 
         let texture_bind_group = |view:&wgpu::TextureView, buffer:&wgpu::Buffer, bind_group_layout:&wgpu::BindGroupLayout, name:&str| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -396,10 +393,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             queue.write_buffer(&target_uniform_buffers[stage], 0, bytemuck::cast_slice(&target_buffer_contents));
         }
 
-        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, staging_uv_buffer, target_views, target_bind_groups)
+        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size).unwrap(), target_views, target_bind_groups)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture_count_x, mut diagonal_texture_count_y, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group, mut staging_uv_buffer, mut target_views, mut target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
+    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture_count_x, mut diagonal_texture_count_y, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group, mut grid_uv_staging_belt, mut grid_uv_staging_offset, mut grid_uv_staging_size, mut target_views, mut target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
 
     // ------ Data/operations for frame draw ------
 
@@ -468,11 +465,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, staging_uv_buffer, target_views, target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
+                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
+                let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
                 {
                     let grid_current = Instant::now();
                     let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
@@ -481,21 +481,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         grid_last_reset = grid_current;
                         grid_last_reset_overflow = grid_time_offset;
 
-                        let mut encoder =
-                            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                         {
                             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
                             cpass.set_pipeline(&rowshift_pipeline);
                             cpass.set_bind_group(0, &rowshift_bind_group, &[]);
                             cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
                         }
-                        queue.submit(Some(encoder.finish()));
 
-                        staging_uv_buffer.slice(..).map_async(wgpu::MapMode::Write, |result| {
-                            let mut mapped_bytes = staging_uv_buffer.slice(..).get_mapped_range_mut();
+                        { // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
+                            let mut mapped_bytes = grid_uv_staging_belt.write_buffer(&mut encoder, &grid_uv_buffer, grid_uv_staging_offset, grid_uv_staging_size, &device);
                             random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(mapped_bytes.deref_mut()));
-                            staging_uv_buffer.unmap();
-                        })
+                        }
+                        grid_uv_staging_belt.finish();
                     }
 
                     let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
@@ -508,8 +505,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let view = frame
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
-                let mut encoder =
-                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 {
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,
