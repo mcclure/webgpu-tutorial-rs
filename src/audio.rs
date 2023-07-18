@@ -65,6 +65,7 @@ where
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+            panic!("Success! Audio callback called");
             audio_write(data, channels, &mut next_value)
         },
         err_fn,
