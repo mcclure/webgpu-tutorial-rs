@@ -22,6 +22,7 @@ where
 enum CpalError {
 	Build(cpal::BuildStreamError),
 	Play(cpal::PlayStreamError),
+    NoDevice,
 	Unknown
 }
 
@@ -34,7 +35,7 @@ impl Display for CpalError {
 impl From<cpal::BuildStreamError> for CpalError { fn from(e: cpal::BuildStreamError) -> Self { CpalError::Build(e) } }
 impl From<cpal::PlayStreamError> for CpalError { fn from(e: cpal::PlayStreamError) -> Self { CpalError::Play(e) } }
 
-fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<(), CpalError>
+fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, CpalError>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -50,11 +51,11 @@ where
         // -- SYNTHESIS HERE --
         let mut out: f32 = 0.0;
         for i in 0..F_COUNT {
-            phase[i] += (i+1) as f32*220./44100.0;
+            phase[i] += (i+1) as f32*55./44100.0;
             if phase[i] <= -1.0 || phase[i] > 1.0 {
                 phase[i] = (phase[i] + 1.0).rem_euclid(2.0) - 1.0;
             }
-            out += phase[i]/F_COUNT as f32;
+            out += phase[i]/F_COUNT as f32 / 2.0;
         }
         out
         // -- BOILERPLATE --
@@ -72,15 +73,15 @@ where
     )?;
     stream.play()?;
 
-    Ok(())
+    Ok(stream)
 }
 
-pub fn audio_spawn() -> cpal::Host {
+pub fn audio_spawn() -> Option<cpal::Stream> {
     let host = cpal::default_host();
     if let Some(device) = host.default_output_device() {
         let config = device.default_output_config().unwrap();
 
-        if let Err(e) = match config.sample_format() {
+        let stream_result = match config.sample_format() {
             cpal::SampleFormat::I8 => audio_run::<i8>(&device, &config.into()),
             cpal::SampleFormat::I16 => audio_run::<i16>(&device, &config.into()),
             // cpal::SampleFormat::I24 => audio_run::<I24>(&device, &config.into()),
@@ -96,14 +97,20 @@ pub fn audio_spawn() -> cpal::Host {
             cpal::SampleFormat::F32 => audio_run::<f32>(&device, &config.into()),
             cpal::SampleFormat::F64 => audio_run::<f64>(&device, &config.into()),
             sample_format => panic!("Unsupported sample format '{sample_format}'"),
-        } {
-            println!("Failure: {}", e);
-        } else {
-            println!("Boot");
+        };
+
+        match stream_result {
+            Err(e) => {
+                println!("Failure: {}", e);
+                None
+            },
+            Ok(v) => {
+                println!("Boot");
+                Some(v)
+            }
         }
     } else {
         println!("Failure: No device");
+        None
     }
-
-    host
 }
