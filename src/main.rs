@@ -261,9 +261,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
              1./2.,  1./2.,
         ];
 
-        let mut grid_vertex:Vec<f32> = Default::default();
-        let mut grid_uv:Vec<f32>     = Default::default();
-        let mut grid_index:Vec<u16>  = Default::default();
+        let mut grid_vertex:Vec<f32>  = Default::default();
+        let mut grid_uv:Vec<f32>      = Default::default();
+        let mut empty_row_uv:Vec<f32> = Default::default();
+        let mut grid_index:Vec<u16>   = Default::default();
 
         // Fill out grid vertex buffer
         let (across_x, across_y) = ((2./side_x).ceil() as i64,
@@ -293,6 +294,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 }
             }
         }
+        for x in 0..(across_x*8) { empty_row_uv.push(0.); } // FIXME use with_capacity
 
         random_uv_push(&mut grid_uv, (across_y*across_x) as usize);
 
@@ -303,11 +305,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             usage: wgpu::BufferUsages::VERTEX, // Immutable
         });
 
-        // Upload grid vertex buffer
+        // Upload grid uv buffer
         let grid_uv_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid uv buffer"),
             contents: bytemuck::cast_slice(&grid_uv),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // Immutable
+            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC, // Mutable, can be written by map operations, can be copied from
+        });
+
+        // Upload uv upload staging buffer
+        let staging_uv_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Staging uv buffer"),
+            contents: bytemuck::cast_slice(&empty_row_uv),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // Mutable, can be targeted by copies or by shaders
         });
 
         // Upload grid index buffer
