@@ -34,4 +34,4 @@ codegen-units = 1   # Reduce number of codegen units to increase optimizations
 panic = 'abort'     # Abort on panic
 
 # To build for Twiggy space profiler, comment this out and add [build]release=false to Trunk.toml
-strip = true        # Strip symbols from binary
+strip = false        # Strip symbols from binary

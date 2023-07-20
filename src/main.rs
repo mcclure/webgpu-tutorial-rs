@@ -323,11 +323,15 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // Mutable, can be targeted by copies or by shaders
         });
 
+log::warn!("Crash upcoming: grid uv buffer has size {}", across_x as u64*across_y as u64*8*mem::size_of::<f32>() as u64);
+
         { // ...and then write bytes to write-mapped uv buffer
             let mut mapped_bytes = grid_uv_buffer.slice(..).get_mapped_range_mut();
             random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(&mut mapped_bytes));
         }
         grid_uv_buffer.unmap();
+
+log::warn!("Somehow survived crash");
 
         let grid_uv_staging_size = across_x as u64*8*mem::size_of::<f32>() as u64;
         let grid_uv_staging_belt = wgpu::util::StagingBelt::new(grid_uv_staging_size);
