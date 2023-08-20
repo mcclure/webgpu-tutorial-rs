@@ -330,10 +330,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
         grid_uv_buffer.unmap();
 
+        // Constants for uploading new rows to the grid of UVs
         let grid_uv_staging_size = across_x as u64*8*mem::size_of::<f32>() as u64;
         let grid_uv_staging_belt = wgpu::util::StagingBelt::new(grid_uv_staging_size);
         let grid_uv_staging_offset = grid_uv_staging_size*(across_y as u64-1);
 
+        // Make a bind group for a stage which takes a texture as input
         let texture_bind_group = |view:&wgpu::TextureView, buffer:&wgpu::Buffer, bind_group_layout:&wgpu::BindGroupLayout, name:&str| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 entries: &[
@@ -355,8 +357,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             })
         };
 
+        // Bind group for initial grid draw
         let grid_bind_group = texture_bind_group(&diagonal_view, &grid_uniform_buffer, &grid_bind_group_layout, "grid bind group");
 
+        // Bind group for shift-up compute shader
         let rowshift_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             entries: &[
                 wgpu::BindGroupEntry {
@@ -372,9 +376,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             label: Some("Row shift bind group")
         });
 
+        // How much to shift up, in compute shader? This value doesn't change until next resize.
         let pair:[u32;1] = [(across_x*8).try_into().unwrap()]; // 8 because we copy floats not [f32x2;4]s
         queue.write_buffer(&rowshift_uniform_buffer, 0, bytemuck::cast_slice(&pair));
 
+        // The blur needs to happen multiple times to look soft. Make two back-buffer textures; we'll render out of one into the other, then swap.
         let target_views: [wgpu::TextureView; 2] = array::from_fn(|view_idx| {
             let (_, target_view) = make_texture_gray(&device, size.width, size.height, true, &format!("target texture {}", view_idx));
             target_view
@@ -382,15 +388,17 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         const BLUR_SCALE_BASE:u32 = 1;
 
+        // Bind groups for our chain of blur passes; they can reuse texture targets, but each one needs its own parameters.
         let target_bind_groups: [wgpu::BindGroup; TARGET_PASSES] = array::from_fn(|stage| {            
             texture_bind_group(&target_views[stage%2], &target_uniform_buffers[stage], &target_bind_group_layout, &format!("target-{} bind group", stage))
         });
 
+        // Fill out blur-pass parameters
         for stage in 0..TARGET_PASSES {
             let blur_scale = (BLUR_SCALE_BASE << (stage/2)) as f32;
             let target_buffer_contents: [f32; 2] =
-                if 0==stage%2 { [blur_scale/size.width as f32, 0.] }
-                else          { [0., blur_scale/size.height as f32] };
+                if 0==stage%2 { [blur_scale/size.width as f32, 0.] }   // Even passes X-blur
+                else          { [0., blur_scale/size.height as f32] }; // Odd passes Y-blur
             queue.write_buffer(&target_uniform_buffers[stage], 0, bytemuck::cast_slice(&target_buffer_contents));
         }
 
@@ -474,14 +482,19 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 let mut encoder =
                         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+                // Animate
                 {
+                    // Time frame is drawn at, for animation purposes
                     let grid_current = Instant::now();
+                    // Time since last rowshift (in % of time to next rowshift)
                     let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
+                    // Time-in-% is more than 100%
                     if grid_time_offset > 1. {
                         grid_time_offset %=  1.; // FIXME: What if it's more than 2?
                         grid_last_reset = grid_current;
                         grid_last_reset_overflow = grid_time_offset;
 
+                        // Begin this frame with a rowshift compute pass
                         {
                             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
                             cpass.set_pipeline(&rowshift_pipeline);
@@ -489,23 +502,30 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
                         }
 
-                        { // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
+                        // Shifting up one row leaves an effectively blank space; fill it with new values
+                        // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
+                        {
                             let mut mapped_bytes = grid_uv_staging_belt.write_buffer(&mut encoder, &grid_uv_buffer, grid_uv_staging_offset, grid_uv_staging_size, &device);
                             random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(mapped_bytes.deref_mut()));
                         }
                         grid_uv_staging_belt.finish();
                     }
 
+                    // Set animation (scroll) parameter
+                    // Notice: We may have already added passes to encoder, but those don't get submitted until cpass is "finished", so this write happens *before* any passes
                     let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
                     queue.write_buffer(&grid_uniform_buffer, 0, bytemuck::cast_slice(&pair));
                 }
 
+                // Draw
                 let frame = surface
                     .get_current_texture()
                     .expect("Failed to acquire next swap chain texture");
                 let view = frame
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
+
+                // Initial draw of grid
                 {
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,
@@ -527,7 +547,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     rpass.draw_indexed(0..grid_index_len, 0, 0..1);
                 }
 
+                // Postprocessing passes
                 for stage in 0..TARGET_PASSES {
+                    // All stages do one dimension in a separable blur-- except the last, which blur-then-thresholds.
                     let final_stage = stage == TARGET_PASSES-1;
                     let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: None,
@@ -552,6 +574,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     rpass.draw_indexed(0..target_index_len, 0, 0..1);
                 }
 
+                // Done
                 queue.submit(Some(encoder.finish()));
                 frame.present();
             }
