@@ -51,6 +51,12 @@ fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     return vec4(value, value, value, 1.0);
 }
 
+@fragment
+fn fs_textured_ymax(vertex: Textured) -> @location(0) vec4<f32> {
+    let value = textureSample(gray, gray_sampler, vec2(vertex.tex_coord.x, 1.)).r;
+    return vec4(value, value, value, 1.0);
+}
+
 // This one-dimensional separable blur filter samples five points and averages them by different amounts.
 // If we do it on two separate axes, we get a 2d blur.
 // Weights and offsets taken from http://rastergrid.com/blog/2010/09/efficient-gaussian-blur-with-linear-sampling/

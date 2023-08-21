@@ -153,6 +153,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         ]
     });
 
+    let readback_bind_group_layout = make_texture_bind_group_layout(&device, &[], "Readback");
+
     let default_sampler = make_sampler(&device);
 
     const ZERO_ZERO_F32: [f32; 2] = [0.,0.];
@@ -182,6 +184,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const GRID_INDEX_BASE : [u16;6] = [0, 2, 1,
                                        1, 2, 3];
 
+    // GPUImageCopyBuffer requires this to be a multiple of 256?
+    // FIXME: Make 1024
+    const AUDIO_READBACK_BUFFER_LEN:usize = 256;
+
     // Create a quad UV buffer with random reflection. Assumes grid_uv is a multiple of 8.
     fn random_uv_push(grid_uv: &mut [f32]) {
         let mut rng = rand::thread_rng();
@@ -206,7 +212,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES]) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES]) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, wgpu::Buffer) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -226,7 +232,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
         let diagonal_texture_side = std::cmp::min(DivCeil::div_ceil(size.height, TILES_ACROSS), DivCeil::div_ceil(size.width, TILES_ACROSS));
 
-        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, true, "diagonal-texture");
+        let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, true, false, "diagonal-texture");
 
         // Draw into the diagonal texture
         {
@@ -382,7 +388,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
         // The blur needs to happen multiple times to look soft. Make two back-buffer textures; we'll render out of one into the other, then swap.
         let target_views: [wgpu::TextureView; 2] = array::from_fn(|view_idx| {
-            let (_, target_view) = make_texture_gray(&device, size.width, size.height, true, &format!("target texture {}", view_idx));
+            let (_, target_view) = make_texture_gray(&device, size.width, size.height, true, false, &format!("target texture {}", view_idx));
             target_view
         });
 
@@ -402,10 +408,40 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
             queue.write_buffer(&target_uniform_buffers[stage], 0, bytemuck::cast_slice(&target_buffer_contents));
         }
 
-        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size).unwrap(), target_views, target_bind_groups)
+        // Read-back texture
+        // FIXME: Should this be a 1D texture instead of a 1-height 2D texture? Does it even matter?
+        let (readback_texture, readback_view) = make_texture_gray(&device, AUDIO_READBACK_BUFFER_LEN as u32, 1, true, true, "readback texture");
+
+        // Read-back buffer
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Readback buffer"),
+            size: AUDIO_READBACK_BUFFER_LEN as u64*mem::size_of::<f32>() as u64,
+            mapped_at_creation: false,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ // Mutable, can be targeted by copies or by shaders
+        });
+
+        // Bind group for write into read-back texture
+        // Can't use texture_bind_group because no parameters
+        // Attempt to read from "final" view texture
+        let readback_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&target_views[(TARGET_PASSES+1)%2]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&default_sampler),
+                },
+            ],
+            layout: &readback_bind_group_layout,
+            label: Some("Readback bind group"),
+        });
+
+        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size).unwrap(), target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffer)
     }
 
-    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture_count_x, mut diagonal_texture_count_y, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group, mut grid_uv_staging_belt, mut grid_uv_staging_offset, mut grid_uv_staging_size, mut target_views, mut target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
+    let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture_count_x, mut diagonal_texture_count_y, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group, mut grid_uv_staging_belt, mut grid_uv_staging_offset, mut grid_uv_staging_size, mut target_views, mut target_bind_groups, mut readback_texture, mut readback_view, mut readback_bind_group, mut readback_buffer) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
 
     // ------ Data/operations for frame draw ------
 
@@ -452,6 +488,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         (target_vertex_buffer, target_index_buffer, 6)
     };
 
+    let (readback_pipeline_layout, readback_pipeline) = make_pipeline(&device, &shader, &[&readback_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_textured_ymax", &[Some(wgpu::TextureFormat::R8Unorm.into())], "readback");
+
     let mut grid_last_reset = Instant::now();
     let mut grid_last_reset_overflow = 0.;
 
@@ -461,10 +499,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // the resources do not leak.
         let _ = (&instance, &adapter, &shader, &render_pipeline_layout);
 
-        // Request continuous animation
         *control_flow = if cfg!(feature = "metal-auto-capture") {
+            // We are running in a debugging tool, quit after 1 frame
             ControlFlow::Exit
         } else {
+            // Request continuous animation
             ControlFlow::Poll
         };
 
@@ -474,13 +513,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 ..
             } => {
                 // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers);
+                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffer) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
                 let mut encoder =
                         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+                const DRAW_OPS: wgpu::Operations<wgpu::Color> = wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: true,
+                };
 
                 // Animate
                 {
@@ -532,10 +576,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &target_views[0],
                             resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                                store: true,
-                            },
+                            ops: DRAW_OPS,
                         })],
                         depth_stencil_attachment: None,
                     });
@@ -560,10 +601,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     &target_views[(stage+1)%2]
                                 },
                             resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                                store: true,
-                            },
+                            ops: DRAW_OPS,
                         })],
                         depth_stencil_attachment: None,
                     });
@@ -573,6 +611,41 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     rpass.set_bind_group(0, &target_bind_groups[stage], &[]);
                     rpass.draw_indexed(0..target_index_len, 0, 0..1);
                 }
+
+                // Read back final row for audio
+                // Draw final row into 1-pixel-high texture:
+                {
+                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &readback_view,
+                            resolve_target: None,
+                            ops: DRAW_OPS,
+                        })],
+                        depth_stencil_attachment: None,
+                    });
+                    rpass.set_pipeline(&readback_pipeline);
+                    rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
+                    rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    rpass.set_bind_group(0, &readback_bind_group, &[]);
+                    rpass.draw_indexed(0..target_index_len, 0, 0..1);
+                }
+                encoder.copy_texture_to_buffer(
+                    wgpu::ImageCopyTextureBase {
+                        texture: &readback_texture,
+                        mip_level:0,
+                        origin: wgpu::Origin3d { x:0,y:0,z:0 },
+                        aspect: wgpu::TextureAspect::All
+                    },
+                    wgpu::ImageCopyBuffer {
+                        buffer: &readback_buffer,
+                        layout: wgpu::ImageDataLayout {
+                            offset:0,
+                            bytes_per_row:None, // Not required, one row.
+                            rows_per_image:None, // Not required, texture not cubic.
+                        }
+                    },
+                    wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1});
 
                 // Done
                 queue.submit(Some(encoder.finish()));

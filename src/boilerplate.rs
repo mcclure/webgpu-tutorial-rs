@@ -50,9 +50,10 @@ pub fn make_sampler(device: &wgpu::Device) -> wgpu::Sampler { // Currently unuse
     device.create_sampler(&wgpu::SamplerDescriptor::default())
 }
 
-pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, target:bool, label:&str) -> (wgpu::Texture, wgpu::TextureView) {
+pub fn make_texture_gray(device: &wgpu::Device, width:u32, height:u32, target:bool, source:bool, label:&str) -> (wgpu::Texture, wgpu::TextureView) {
 	let mut usage = wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::COPY_DST);
     if target { usage = usage | wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::RENDER_ATTACHMENT) };
+    if source { usage = usage | wgpu::TextureUsages::TEXTURE_BINDING.union(wgpu::TextureUsages::COPY_SRC) };
 
     let texture_descriptor:wgpu::TextureDescriptor = wgpu::TextureDescriptor {
 	    size: wgpu::Extent3d {width:width, height:height, depth_or_array_layers:1},
