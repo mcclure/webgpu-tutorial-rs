@@ -649,6 +649,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 );
 
                 // Done
+                println!("SUBMITTING FRAME…");
                 queue.submit(Some(encoder.finish()));
                 {
                     let slice = readback_buffer.slice(..);
