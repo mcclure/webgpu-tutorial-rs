@@ -651,19 +651,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 // Done
                 queue.submit(Some(encoder.finish()));
                 {
+                    let slice = readback_buffer.slice(..);
                     let readback_buffer = readback_buffer.clone();
-                    queue.on_submitted_work_done(move || {
-                        let slice = readback_buffer.slice(..);
-                        let readback_buffer = readback_buffer.clone();
-                        slice.map_async(wgpu::MapMode::Read, move |result| {
-                            if let Ok(()) = result {
-                                let slice = readback_buffer.slice(..);
-                                let range = slice.get_mapped_range();
-                                let row = bytemuck::cast_slice::<u8, f32>(&range);
-                                println!("HAVE MAPPED RANGE! {}", row[0]);
-                            }
-                            readback_buffer.unmap();
-                        })
+
+                    // The WebGPU spec says this promise resolves successfully only "after the completion of currently-enqueued operations that use 'this'", so this doubles as an on_submitted_work_done for these purposes.
+                    slice.map_async(wgpu::MapMode::Read, move |result| {
+                        if let Ok(()) = result {
+                            let slice = readback_buffer.slice(..);
+                            let range = slice.get_mapped_range();
+                            let row = bytemuck::cast_slice::<u8, f32>(&range);
+                            println!("HAVE MAPPED RANGE! {}", row[0]);
+                        }
+                        readback_buffer.unmap();
                     });
                 }
                 frame.present();
