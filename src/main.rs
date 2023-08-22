@@ -212,7 +212,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         }
     }
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, wgpu::Buffer) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, std::sync::Arc<wgpu::Buffer>) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -412,13 +412,13 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         // FIXME: Should this be a 1D texture instead of a 1-height 2D texture? Does it even matter?
         let (readback_texture, readback_view) = make_texture_gray(&device, AUDIO_READBACK_BUFFER_LEN as u32, 1, true, true, "readback texture");
 
-        // Read-back buffer
-        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        // Read-back buffer (will be used by callback, so has to be refcounted, and callback is 'Send so the Rust typesystem forces an unnecessary atomicity requirement)
+        let readback_buffer = std::sync::Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Readback buffer"),
             size: AUDIO_READBACK_BUFFER_LEN as u64*mem::size_of::<f32>() as u64,
             mapped_at_creation: false,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ // Mutable, can be targeted by copies or by shaders
-        });
+        }));
 
         // Bind group for write into read-back texture
         // Can't use texture_bind_group because no parameters
@@ -650,9 +650,22 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
                 // Done
                 queue.submit(Some(encoder.finish()));
-                queue.on_submitted_work_done(|| {
-
-                });
+                {
+                    let readback_buffer = readback_buffer.clone();
+                    queue.on_submitted_work_done(move || {
+                        let slice = readback_buffer.slice(..);
+                        let readback_buffer = readback_buffer.clone();
+                        slice.map_async(wgpu::MapMode::Read, move |result| {
+                            if let Ok(()) = result {
+                                let slice = readback_buffer.slice(..);
+                                let range = slice.get_mapped_range();
+                                let row = bytemuck::cast_slice::<u8, f32>(&range);
+                                println!("HAVE MAPPED RANGE! {}", row[0]);
+                            }
+                            readback_buffer.unmap();
+                        })
+                    });
+                }
                 frame.present();
             }
             // The winit docs recommend doing your "state update" in MainEventsCleared and your draw triggering/logic here.
