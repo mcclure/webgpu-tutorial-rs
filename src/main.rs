@@ -645,10 +645,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                             rows_per_image:None, // Not required, texture not cubic.
                         }
                     },
-                    wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1});
+                    wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
+                );
 
                 // Done
                 queue.submit(Some(encoder.finish()));
+                queue.on_submitted_work_done(|| {
+
+                });
                 frame.present();
             }
             // The winit docs recommend doing your "state update" in MainEventsCleared and your draw triggering/logic here.
