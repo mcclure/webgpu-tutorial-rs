@@ -185,12 +185,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     const GRID_INDEX_BASE : [u16;6] = [0, 2, 1,
                                        1, 2, 3];
 
-    // GPUImageCopyBuffer requires this to be a multiple of 256?
-    // FIXME: Make 1024
-    const AUDIO_READBACK_BUFFER_LEN:usize = 256;
+    // GPUImageCopyBuffer requires this to be a multiple of 256
+    const AUDIO_READBACK_BUFFER_LEN:usize = 1024;
 
     // FIXME: Add some way to set this to 0 at runtime (for a "mute").
-    const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 1;
+    const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 3;
 
     // Create a quad UV buffer with random reflection. Assumes grid_uv is a multiple of 8.
     fn random_uv_push(grid_uv: &mut [f32]) {
@@ -421,7 +420,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         for idx in 0..AUDIO_READBACK_BUFFER_MAX_INFLIGHT {
             readback_buffers.push(Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("Readback buffer {}", idx)),
-                size: AUDIO_READBACK_BUFFER_LEN as u64*mem::size_of::<f32>() as u64,
+                size: AUDIO_READBACK_BUFFER_LEN as u64, // Returned values are u8
                 mapped_at_creation: false,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ // Mutable, can be targeted by copies or by shaders
             })));
@@ -527,6 +526,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 window.request_redraw();
             }
             Event::RedrawRequested(_) => {
+                device.poll(wgpu::MaintainBase::Poll); // Flush out unmaps from last frames before doing any work. // FIXME: IS THIS ACTUALLY HELPFUL?
+
                 let mut encoder =
                         device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -664,7 +665,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         },
                         wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
                     );
-                }
+                } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
 
                 // Done
                 queue.submit(Some(encoder.finish()));
@@ -680,7 +681,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         if let Ok(()) = result {
                             let slice = readback_buffer.slice(..);
                             let row = slice.get_mapped_range();
-                            println!("HAVE MAPPED RANGE (of {})! {:#04x} {:#04x} {:#04x} {:#04x}", row.len(), row[0], row[0], row[0], row[0]);
+                            println!("HAVE MAPPED RANGE (of {})! {:#04x} {:#04x} {:#04x} {:#04x} ... {:#04x}", row.len(), row[0], row[1], row[2], row[3], row[row.len()-1]);
                         }
                         readback_buffer.unmap();
                         // Drop readback buffer in channel so it can be returned to pool.
