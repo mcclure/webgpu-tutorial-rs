@@ -50,11 +50,11 @@ fn audio_run<T>(
 where
     T: SizedSample + FromSample<f32>,
 {
-    //    let sample_rate = config.sample_rate.0 as f32;
+    // let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
     // Produce a sinusoid of maximum amplitude.
-    //    let mut sample_clock = 0f32;
+    // let mut sample_clock = 0f32;
 
     const F_COUNT: usize = 6;
     let mut phase: [f32; F_COUNT] = Default::default();
