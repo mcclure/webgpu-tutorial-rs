@@ -1,10 +1,10 @@
 // Construct CPAL stuff
 
-use std::fmt::Display;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, Sample, SizedSample,
 };
+use std::fmt::Display;
 
 fn audio_write<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 where
@@ -20,42 +20,53 @@ where
 
 #[derive(Debug)]
 enum CpalError {
-	Build(cpal::BuildStreamError),
-	Play(cpal::PlayStreamError),
+    Build(cpal::BuildStreamError),
+    Play(cpal::PlayStreamError),
     NoDevice,
-	Unknown
+    Unknown,
 }
 
 impl std::error::Error for CpalError {}
 impl Display for CpalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    	write!(f, "{:?}", self)
+        write!(f, "{:?}", self)
     }
 }
-impl From<cpal::BuildStreamError> for CpalError { fn from(e: cpal::BuildStreamError) -> Self { CpalError::Build(e) } }
-impl From<cpal::PlayStreamError> for CpalError { fn from(e: cpal::PlayStreamError) -> Self { CpalError::Play(e) } }
+impl From<cpal::BuildStreamError> for CpalError {
+    fn from(e: cpal::BuildStreamError) -> Self {
+        CpalError::Build(e)
+    }
+}
+impl From<cpal::PlayStreamError> for CpalError {
+    fn from(e: cpal::PlayStreamError) -> Self {
+        CpalError::Play(e)
+    }
+}
 
-fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, CpalError>
+fn audio_run<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+) -> Result<cpal::Stream, CpalError>
 where
     T: SizedSample + FromSample<f32>,
 {
-//    let sample_rate = config.sample_rate.0 as f32;
+    // let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
     // Produce a sinusoid of maximum amplitude.
-//    let mut sample_clock = 0f32;
+    // let mut sample_clock = 0f32;
 
-    const F_COUNT:usize = 6;
-    let mut phase:[f32;F_COUNT] = Default::default();
+    const F_COUNT: usize = 6;
+    let mut phase: [f32; F_COUNT] = Default::default();
     let mut next_value = move || {
         // -- SYNTHESIS HERE --
         let mut out: f32 = 0.0;
         for i in 0..F_COUNT {
-            phase[i] += (i+1) as f32*55./44100.0;
+            phase[i] += (i + 1) as f32 * 55. / 44100.0;
             if phase[i] <= -1.0 || phase[i] > 1.0 {
                 phase[i] = (phase[i] + 1.0).rem_euclid(2.0) - 1.0;
             }
-            out += phase[i]/F_COUNT as f32 / 2.0;
+            out += phase[i] / F_COUNT as f32 / 2.0;
         }
         out
         // -- BOILERPLATE --
@@ -103,7 +114,7 @@ pub fn audio_spawn() -> Option<cpal::Stream> {
             Err(e) => {
                 println!("Failure: {}", e);
                 None
-            },
+            }
             Ok(v) => {
                 println!("Boot");
                 Some(v)
