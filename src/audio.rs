@@ -5,6 +5,9 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, Sample, SizedSample,
 };
+use std::sync::mpsc;
+
+use crate::constants::*;
 
 fn audio_write<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 where
@@ -35,7 +38,7 @@ impl Display for CpalError {
 impl From<cpal::BuildStreamError> for CpalError { fn from(e: cpal::BuildStreamError) -> Self { CpalError::Build(e) } }
 impl From<cpal::PlayStreamError> for CpalError { fn from(e: cpal::PlayStreamError) -> Self { CpalError::Play(e) } }
 
-fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream, CpalError>
+fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig, audio_chunk_recv: mpsc::Receiver<Box<AudioChunk>>) -> Result<cpal::Stream, CpalError>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -45,18 +48,20 @@ where
     // Produce a sinusoid of maximum amplitude.
 //    let mut sample_clock = 0f32;
 
-    const F_COUNT:usize = 6;
-    let mut phase:[f32;F_COUNT] = Default::default();
+    // AUDIO STATE HERE
+    let mut current:Box<AudioChunk> = Box::new(std::array::from_fn(|_|0.));
+    let mut current_idx = AUDIO_READBACK_BUFFER_LEN;
+
     let mut next_value = move || {
         // -- SYNTHESIS HERE --
-        let mut out: f32 = 0.0;
-        for i in 0..F_COUNT {
-            phase[i] += (i+1) as f32*55./44100.0;
-            if phase[i] <= -1.0 || phase[i] > 1.0 {
-                phase[i] = (phase[i] + 1.0).rem_euclid(2.0) - 1.0;
+        if current_idx >= AUDIO_READBACK_BUFFER_LEN {
+            if let Ok(incoming_chunk) = audio_chunk_recv.try_recv() {
+                current = incoming_chunk;
             }
-            out += phase[i]/F_COUNT as f32 / 2.0;
+            current_idx = 0;
         }
+        let out = current[current_idx];
+        current_idx += 1;
         out
         // -- BOILERPLATE --
     };
@@ -76,26 +81,26 @@ where
     Ok(stream)
 }
 
-pub fn audio_spawn() -> Option<cpal::Stream> {
+pub fn audio_spawn(audio_chunk_recv: mpsc::Receiver<Box<AudioChunk>>) -> Option<cpal::Stream> {
     let host = cpal::default_host();
     if let Some(device) = host.default_output_device() {
         let config = device.default_output_config().unwrap();
 
         let stream_result = match config.sample_format() {
-            cpal::SampleFormat::I8 => audio_run::<i8>(&device, &config.into()),
-            cpal::SampleFormat::I16 => audio_run::<i16>(&device, &config.into()),
-            // cpal::SampleFormat::I24 => audio_run::<I24>(&device, &config.into()),
-            cpal::SampleFormat::I32 => audio_run::<i32>(&device, &config.into()),
-            // cpal::SampleFormat::I48 => audio_run::<I48>(&device, &config.into()),
-            cpal::SampleFormat::I64 => audio_run::<i64>(&device, &config.into()),
-            cpal::SampleFormat::U8 => audio_run::<u8>(&device, &config.into()),
-            cpal::SampleFormat::U16 => audio_run::<u16>(&device, &config.into()),
-            // cpal::SampleFormat::U24 => audio_run::<U24>(&device, &config.into()),
-            cpal::SampleFormat::U32 => audio_run::<u32>(&device, &config.into()),
-            // cpal::SampleFormat::U48 => audio_run::<U48>(&device, &config.into()),
-            cpal::SampleFormat::U64 => audio_run::<u64>(&device, &config.into()),
-            cpal::SampleFormat::F32 => audio_run::<f32>(&device, &config.into()),
-            cpal::SampleFormat::F64 => audio_run::<f64>(&device, &config.into()),
+            cpal::SampleFormat::I8 => audio_run::<i8>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::I16 => audio_run::<i16>(&device, &config.into(), audio_chunk_recv),
+            // cpal::SampleFormat::I24 => audio_run::<I24>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::I32 => audio_run::<i32>(&device, &config.into(), audio_chunk_recv),
+            // cpal::SampleFormat::I48 => audio_run::<I48>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::I64 => audio_run::<i64>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::U8 => audio_run::<u8>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::U16 => audio_run::<u16>(&device, &config.into(), audio_chunk_recv),
+            // cpal::SampleFormat::U24 => audio_run::<U24>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::U32 => audio_run::<u32>(&device, &config.into(), audio_chunk_recv),
+            // cpal::SampleFormat::U48 => audio_run::<U48>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::U64 => audio_run::<u64>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::F32 => audio_run::<f32>(&device, &config.into(), audio_chunk_recv),
+            cpal::SampleFormat::F64 => audio_run::<f64>(&device, &config.into(), audio_chunk_recv),
             sample_format => panic!("Unsupported sample format '{sample_format}'"),
         };
 

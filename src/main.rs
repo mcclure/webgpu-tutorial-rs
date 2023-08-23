@@ -28,7 +28,7 @@ use crate::boilerplate::*;
 use crate::constants::*;
 use crate::diagonal::*;
 
-async fn run(event_loop: EventLoop<()>, window: Window) {
+async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::SyncSender<Box<AudioChunk>>) {
     // ----------------------- Basic setup ----------------------
 
     let size = window.inner_size();
@@ -184,9 +184,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     // Triangle order for a quad in grid or target passes
     const GRID_INDEX_BASE : [u16;6] = [0, 2, 1,
                                        1, 2, 3];
-
-    // GPUImageCopyBuffer requires this to be a multiple of 256
-    const AUDIO_READBACK_BUFFER_LEN:usize = 1024;
 
     // FIXME: Add some way to set this to 0 at runtime (for a "mute").
     const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 3;
@@ -675,13 +672,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let slice = readback_buffer.slice(..);
                     let readback_buffer = readback_buffer.clone();
                     let readback_buffer_send = readback_buffer_send.clone();
+                    let audio_chunk_send = audio_chunk_send.clone();
 
                     // The WebGPU spec says this promise resolves successfully only "after the completion of currently-enqueued operations that use 'this'", so this doubles as an on_submitted_work_done for these purposes.
                     slice.map_async(wgpu::MapMode::Read, move |result| {
                         if let Ok(()) = result {
                             let slice = readback_buffer.slice(..);
                             let row = slice.get_mapped_range();
-                            println!("HAVE MAPPED RANGE (of {})! {:#04x} {:#04x} {:#04x} {:#04x} ... {:#04x}", row.len(), row[0], row[1], row[2], row[3], row[row.len()-1]);
+                            let chunk:AudioChunk = array::from_fn(|id| {
+                                1. - row[id] as f32/0xFF as f32
+                            });
+                            let result = audio_chunk_send.try_send(Box::new(chunk));
+                            if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
                         }
                         readback_buffer.unmap();
                         // Drop readback buffer in channel so it can be returned to pool.
@@ -709,12 +711,18 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
-    let audio = crate::audio::audio_spawn();
+
+    // Initialize audio before window
+    const AUDIO_CHUNK_MAX_INFLIGHT: usize = 3;
+    // Use sync_channel to prevent unlimited buildup
+    let (audio_chunk_send, audio_chunk_recv) = mpsc::sync_channel::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
+    
+    let audio = crate::audio::audio_spawn(audio_chunk_recv);
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
-        pollster::block_on(run(event_loop, window));
+        pollster::block_on(run(event_loop, window, audio_chunk_send));
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -729,6 +737,6 @@ fn main() {
                     .ok()
             })
             .expect("couldn't append canvas to document body");
-        wasm_bindgen_futures::spawn_local(run(event_loop, window));
+        wasm_bindgen_futures::spawn_local(run(event_loop, window, audio_chunk_send));
     }
 }
