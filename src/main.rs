@@ -11,15 +11,16 @@ use std::mem;
 use std::num::NonZeroU64;
 use std::ops::DerefMut;
 use std::sync::{Arc, mpsc};
+use atomic_refcell::AtomicRefCell;
+use divrem::DivCeil;
+use rand::Rng;
 use web_time::{Duration, Instant};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::Window, dpi::PhysicalSize,
 };
-use divrem::DivCeil;
 use wgpu::util::DeviceExt;
-use rand::Rng;
 
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
@@ -495,6 +496,14 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
 
     let (readback_pipeline_layout, readback_pipeline) = make_pipeline(&device, &shader, &[&readback_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_textured_ymax", &[Some(wgpu::TextureFormat::R8Unorm.into())], "readback");
 
+    let mut fft_planner = realfft::RealFftPlanner::<f64>::new();
+    let fft = Arc::new(fft_planner.plan_fft_inverse(AUDIO_READBACK_BUFFER_LEN*2));
+    // We'd like to reuse these buffers, but the Wgpu callback thinks it's running on another thread (per the documentation, it's not)
+    // Since we don't actually need thread safety, we don't want to pay for RwLock. So we use the atomic_refcell crate:
+    // FIXME: probably using thread-local variables here would be more straightforward
+    let fft_in = Arc::new(AtomicRefCell::new(fft.make_input_vec()));
+    let fft_out = Arc::new(AtomicRefCell::new(fft.make_output_vec()));
+
     let mut grid_last_reset = Instant::now();
     let mut grid_last_reset_overflow = 0.;
 
@@ -502,7 +511,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
         // the resources do not leak.
-        let _ = (&instance, &adapter, &shader, &render_pipeline_layout);
+        let _ = (&instance, &adapter, &shader, &render_pipeline_layout, &fft, &fft_in, &fft_out);
 
         *control_flow = if cfg!(feature = "metal-auto-capture") {
             // We are running in a debugging tool, quit after 1 frame
@@ -670,17 +679,31 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
                 // If we submitted a readback above, queue up to service it when it's done
                 if let Some(readback_buffer) = readback_buffer {
                     let slice = readback_buffer.slice(..);
+                    // Clone all Arcs that will be captured by the closure below
                     let readback_buffer = readback_buffer.clone();
                     let readback_buffer_send = readback_buffer_send.clone();
                     let audio_chunk_send = audio_chunk_send.clone();
+                    let (fft, fft_in, fft_out) = (fft.clone(), fft_in.clone(), fft_out.clone());
 
                     // The WebGPU spec says this promise resolves successfully only "after the completion of currently-enqueued operations that use 'this'", so this doubles as an on_submitted_work_done for these purposes.
                     slice.map_async(wgpu::MapMode::Read, move |result| {
                         if let Ok(()) = result {
                             let slice = readback_buffer.slice(..);
+                            let (mut fft_in, mut fft_out) = (fft_in.borrow_mut(), fft_out.borrow_mut());
+
                             let row = slice.get_mapped_range();
-                            let chunk:AudioChunk = array::from_fn(|id| {
-                                1. - row[id] as f32/0xFF as f32
+                            let mut rng = rand::thread_rng(); // FIXME precompute this
+                            fft_in[0] = Default::default(); // Zero
+                            fft_in[AUDIO_READBACK_BUFFER_LEN-1] = Default::default(); // Zero
+                            for idx in 0..(AUDIO_READBACK_BUFFER_LEN-1) {
+                                let phase = rng.gen::<f64>() * 2. * std::f64::consts::PI;
+                                let ampl = 1. - row[idx] as f64/0xFF as f64;
+                                fft_in[idx+1] = realfft::num_complex::Complex { re:phase.cos()*ampl, im:phase.sin()*ampl };
+                            }
+                            fft.process(&mut fft_in, &mut fft_out).unwrap();
+                            // We're done except we want f32s
+                            let chunk:AudioChunk = array::from_fn(|idx| {
+                                fft_out[idx] as f32
                             });
                             let result = audio_chunk_send.try_send(Box::new(chunk));
                             if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
