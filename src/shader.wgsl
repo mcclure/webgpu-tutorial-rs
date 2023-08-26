@@ -51,9 +51,12 @@ fn fs_textured(vertex: Textured) -> @location(0) vec4<f32> {
     return vec4(value, value, value, 1.0);
 }
 
+// Y is fixed at max; X is an exponential curve
+const readback_curve = 20.; // FIXME: Match to x_across?
 @fragment
-fn fs_textured_ymax(vertex: Textured) -> @location(0) vec4<f32> {
-    let value = textureSample(gray, gray_sampler, vec2(vertex.tex_coord.x, 1.)).r;
+fn fs_textured_readback(vertex: Textured) -> @location(0) vec4<f32> {
+    let x = 1. - pow(2., -vertex.tex_coord.x*readback_curve);
+    let value = textureSample(gray, gray_sampler, vec2(x, 1.)).r;
     return vec4(value, value, value, 1.0);
 }
 

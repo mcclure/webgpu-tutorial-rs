@@ -494,7 +494,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
         (target_vertex_buffer, target_index_buffer, 6)
     };
 
-    let (readback_pipeline_layout, readback_pipeline) = make_pipeline(&device, &shader, &[&readback_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_textured_ymax", &[Some(wgpu::TextureFormat::R8Unorm.into())], "readback");
+    let (readback_pipeline_layout, readback_pipeline) = make_pipeline(&device, &shader, &[&readback_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_textured_readback", &[Some(wgpu::TextureFormat::R8Unorm.into())], "readback");
 
     let mut fft_planner = realfft::RealFftPlanner::<f64>::new();
     let fft = Arc::new(fft_planner.plan_fft_inverse(AUDIO_READBACK_BUFFER_LEN*2));
