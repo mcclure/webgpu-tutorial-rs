@@ -115,6 +115,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "apodize"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fca387cdc0a1f9c7a7c26556d584aa2d07fc529843082e4861003cde4ab914ed"
+
+[[package]]
 name = "arrayref"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2018,6 +2024,7 @@ dependencies = [
 name = "wgpu-hello"
 version = "0.1.0"
 dependencies = [
+ "apodize",
  "atomic_refcell",
  "bytemuck",
  "console_error_panic_hook",
