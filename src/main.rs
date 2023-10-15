@@ -507,6 +507,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
     let mut grid_last_reset = Instant::now();
     let mut grid_last_reset_overflow = 0.;
 
+    let fft_window:[f64;AUDIO_READBACK_BUFFER_LEN] = apodize::hanning_iter(AUDIO_READBACK_BUFFER_LEN).collect::<Vec<f64>>().try_into().unwrap();
+
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
@@ -703,7 +705,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
                             fft.process(&mut fft_in, &mut fft_out).unwrap();
                             // We're done except we want f32s
                             let chunk:AudioChunk = array::from_fn(|idx| {
-                                fft_out[idx] as f32
+                                (fft_out[idx]*fft_window[idx/2]/2.0) as f32
                             });
                             let result = audio_chunk_send.try_send(Box::new(chunk));
                             if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
