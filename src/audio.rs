@@ -52,13 +52,13 @@ where
     // One box is "current", the other is "previous"
     let mut chunks:[Box<AudioChunk>;2] = [Box::new(std::array::from_fn(|_|0.)), Box::new(std::array::from_fn(|_|0.))];
     let mut box_idx = 1;
-    let mut sample_idx = AUDIO_READBACK_BUFFER_LEN;
+    let mut sample_idx = AUDIO_CHUNK_LEN;
     let mut transitioning = false;
-    let trail_by = AUDIO_READBACK_BUFFER_LEN + AUDIO_READBACK_BUFFER_LEN/2;
+    let trail_by = AUDIO_CHUNK_LEN + AUDIO_CHUNK_LEN/2;
 
     let mut next_value = move || {
         // -- SYNTHESIS HERE --
-        if sample_idx >= AUDIO_READBACK_BUFFER_LEN {
+        if sample_idx >= AUDIO_CHUNK_LEN {
             if let Ok(incoming_chunk) = audio_chunk_recv.try_recv() {
                 chunks[box_idx] = incoming_chunk;
             }
@@ -66,7 +66,7 @@ where
             transitioning = true;
         }
         // Chunks from the graphics thread are pre-windowed and pre-divided by two so we just need to sum them
-        let out = chunks[if transitioning {(box_idx+1)%2} else {box_idx}][(sample_idx+trail_by)%AUDIO_READBACK_BUFFER_LEN] + chunks[box_idx][sample_idx];
+        let out = chunks[if transitioning {(box_idx+1)%2} else {box_idx}][(sample_idx+trail_by)%AUDIO_CHUNK_LEN] + chunks[box_idx][sample_idx];
         sample_idx += 1;
         out
         // -- BOILERPLATE --
