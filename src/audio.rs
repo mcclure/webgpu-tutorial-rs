@@ -9,14 +9,28 @@ use std::sync::mpsc;
 
 use crate::constants::*;
 
-fn audio_write<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
+#[cfg(feature = "audio_log")]
+use std::io::Write;
+#[cfg(feature = "audio_log")]
+type AudioLog = std::fs::File;
+#[cfg(not(feature = "audio_log"))]
+type AudioLog = ();
+
+fn audio_write<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32, audio_log: &mut AudioLog)
 where
-    T: Sample + FromSample<f32>,
+    T: Sample + FromSample<f32> + bytemuck::Pod, /* Pod constraint can be removed without audio_log */
 {
+    // Chop output array into slices of size "channels"
     for frame in output.chunks_mut(channels) {
         let value: T = T::from_sample(next_sample());
+        // Take one sample and interleave it into all channels
         for sample in frame.iter_mut() {
             *sample = value;
+        }
+
+        #[cfg(feature = "audio_log")]
+        {
+            audio_log.write_all(bytemuck::cast_slice(&[value])); // 256 attenuation is arbitrary
         }
     }
 }
@@ -40,7 +54,7 @@ impl From<cpal::PlayStreamError> for CpalError { fn from(e: cpal::PlayStreamErro
 
 fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig, audio_chunk_recv: mpsc::Receiver<Box<AudioChunk>>) -> Result<cpal::Stream, CpalError>
 where
-    T: SizedSample + FromSample<f32>,
+    T: SizedSample + FromSample<f32> + bytemuck::Pod, /* Pod constraint can be removed without audio_log */
 {
 //    let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
@@ -65,8 +79,17 @@ where
             sample_idx = 0;
             transitioning = true;
         }
+        // /*FIXME*/ println!("{}, {}, {}", box_idx, transitioning, if transitioning { (box_idx+1)%2 } else {box_idx});
         // Chunks from the graphics thread are pre-windowed and pre-divided by two so we just need to sum them
-        let out = chunks[if transitioning {(box_idx+1)%2} else {box_idx}][(sample_idx+trail_by)%AUDIO_CHUNK_LEN] + chunks[box_idx][sample_idx];
+        let out
+          = chunks[
+                if transitioning {
+                    (box_idx+1)%2
+                } else {box_idx}
+            ][
+                (sample_idx+trail_by)%AUDIO_CHUNK_LEN
+            ]
+          + chunks[box_idx][sample_idx];
         sample_idx += 1;
         out
         // -- BOILERPLATE --
@@ -74,10 +97,15 @@ where
 
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
+    #[cfg(feature = "audio_log")]
+    let mut audio_log = std::fs::File::create("audio_log.raw").unwrap();
+    #[cfg(not(feature = "audio_log"))]
+    let mut audio_log:AudioLog = ();
+
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-            audio_write(data, channels, &mut next_value)
+            audio_write(data, channels, &mut next_value, &mut audio_log)
         },
         err_fn,
         None,

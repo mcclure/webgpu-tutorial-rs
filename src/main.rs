@@ -705,7 +705,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
                             fft.process(&mut fft_in, &mut fft_out).unwrap();
                             // We're done except we want f32s
                             let chunk:AudioChunk = array::from_fn(|idx| {
-                                (fft_out[idx]*fft_window[idx]) as f32
+                                (fft_out[idx]*fft_window[idx]) as f32 / 256.0 /* DIVISOR IS ARBITRARY FIXME */
                             });
                             let result = audio_chunk_send.try_send(Box::new(chunk));
                             if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }

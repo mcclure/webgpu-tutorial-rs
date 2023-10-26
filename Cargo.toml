@@ -19,6 +19,9 @@ web-time = "0.2.0"
 wgpu = "0.16.2"
 winit = "0.29.0-beta.0"
 
+[features]
+audio_log = []
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3.61", features = ["Document", "Text"] }
 console_error_panic_hook = "0.1.7"
