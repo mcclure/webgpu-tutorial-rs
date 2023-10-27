@@ -23,6 +23,7 @@ where
     // Chop output array into slices of size "channels"
     for frame in output.chunks_mut(channels) {
         let value: T = T::from_sample(next_sample());
+
         // Take one sample and interleave it into all channels
         for sample in frame.iter_mut() {
             *sample = value;
@@ -30,7 +31,7 @@ where
 
         #[cfg(feature = "audio_log")]
         {
-            audio_log.write_all(bytemuck::cast_slice(&[value])); // 256 attenuation is arbitrary
+            audio_log.write_all(bytemuck::cast_slice(&[value]));
         }
     }
 }
@@ -63,23 +64,26 @@ where
 //    let mut sample_clock = 0f32;
 
     // AUDIO STATE HERE
-    // One box is "current", the other is "previous"
+    // One box is "current", the other is "previous".
     let mut chunks:[Box<AudioChunk>;2] = [Box::new(std::array::from_fn(|_|0.)), Box::new(std::array::from_fn(|_|0.))];
     let mut box_idx = 1;
     let mut sample_idx = AUDIO_CHUNK_LEN;
-    let mut transitioning = false;
-    let trail_by = AUDIO_CHUNK_LEN + AUDIO_CHUNK_LEN/2;
+    let mut transitioning = true;
+    let trail_by = AUDIO_CHUNK_LEN/2;
 
     let mut next_value = move || {
         // -- SYNTHESIS HERE --
         if sample_idx >= AUDIO_CHUNK_LEN {
             if let Ok(incoming_chunk) = audio_chunk_recv.try_recv() {
+                box_idx = (box_idx + 1) % 2;
                 chunks[box_idx] = incoming_chunk;
+                transitioning = true;
+            } else {
+                transitioning = false;
             }
             sample_idx = 0;
-            transitioning = true;
         }
-        // /*FIXME*/ println!("{}, {}, {}", box_idx, transitioning, if transitioning { (box_idx+1)%2 } else {box_idx});
+//        println!("{}:{}, {}, {}", box_idx, sample_idx, transitioning, if transitioning { (box_idx+1)%2 } else {box_idx});
         // Chunks from the graphics thread are pre-windowed and pre-divided by two so we just need to sum them
         let out
           = chunks[
