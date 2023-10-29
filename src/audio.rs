@@ -5,7 +5,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, Sample, SizedSample,
 };
-use std::sync::mpsc;
 
 use crate::constants::*;
 
@@ -53,7 +52,7 @@ impl Display for CpalError {
 impl From<cpal::BuildStreamError> for CpalError { fn from(e: cpal::BuildStreamError) -> Self { CpalError::Build(e) } }
 impl From<cpal::PlayStreamError> for CpalError { fn from(e: cpal::PlayStreamError) -> Self { CpalError::Play(e) } }
 
-fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig, audio_chunk_recv: mpsc::Receiver<Box<AudioChunk>>) -> Result<cpal::Stream, CpalError>
+fn audio_run<T>(device: &cpal::Device, config: &cpal::StreamConfig, audio_chunk_recv: crossbeam_channel::Receiver<Box<AudioChunk>>) -> Result<cpal::Stream, CpalError>
 where
     T: SizedSample + FromSample<f32> + bytemuck::Pod, /* Pod constraint can be removed without audio_log */
 {
@@ -119,7 +118,7 @@ where
     Ok(stream)
 }
 
-pub fn audio_spawn(audio_chunk_recv: mpsc::Receiver<Box<AudioChunk>>) -> Option<cpal::Stream> {
+pub fn audio_spawn(audio_chunk_recv: crossbeam_channel::Receiver<Box<AudioChunk>>) -> Option<cpal::Stream> {
     let host = cpal::default_host();
     if let Some(device) = host.default_output_device() {
         let config = device.default_output_config().unwrap();

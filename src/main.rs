@@ -10,8 +10,9 @@ use std::borrow::Cow;
 use std::mem;
 use std::num::NonZeroU64;
 use std::ops::DerefMut;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
+use crossbeam_channel::bounded;
 use divrem::DivCeil;
 use rand::Rng;
 use web_time::{Duration, Instant};
@@ -29,7 +30,7 @@ use crate::boilerplate::*;
 use crate::constants::*;
 use crate::diagonal::*;
 
-async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::SyncSender<Box<AudioChunk>>) {
+async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossbeam_channel::Sender<Box<AudioChunk>>) {
     // ----------------------- Basic setup ----------------------
 
     let size = window.inner_size();
@@ -187,7 +188,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
                                        1, 2, 3];
 
     // FIXME: Add some way to set this to 0 at runtime (for a "mute").
-    const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 3;
+    const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 2;
 
     // Create a quad UV buffer with random reflection. Assumes grid_uv is a multiple of 8.
     fn random_uv_push(grid_uv: &mut [f32]) {
@@ -213,7 +214,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
         }
     }
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, mpsc::SyncSender<Arc<wgpu::Buffer>>, mpsc::Receiver<Arc<wgpu::Buffer>>) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, crossbeam_channel::Sender<Arc<wgpu::Buffer>>, crossbeam_channel::Receiver<Arc<wgpu::Buffer>>) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -424,7 +425,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
             })));
         }
         // Using sync_channel because it's theoretically more efficient and we can't overflow it.
-        let (readback_buffer_send, readback_buffer_recv) = mpsc::sync_channel::<Arc<wgpu::Buffer>>(AUDIO_READBACK_BUFFER_MAX_INFLIGHT);
+        let (readback_buffer_send, readback_buffer_recv) = crossbeam_channel::bounded::<Arc<wgpu::Buffer>>(AUDIO_READBACK_BUFFER_MAX_INFLIGHT);
 
         // Bind group for write into read-back texture
         // Can't use texture_bind_group because no parameters
@@ -635,45 +636,48 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: mpsc::
                     readback_buffers.push(readback_buffer);
                 }
                 // Don't bother with readback if audio is already busy
-                let readback_buffer = readback_buffers.pop();
-                if let Some(ref readback_buffer) = readback_buffer {
-                    // Read back final row for audio
-                    // Draw final row into 1-pixel-high texture:
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &readback_view,
-                                resolve_target: None,
-                                ops: DRAW_OPS,
-                            })],
-                            depth_stencil_attachment: None,
-                        });
-                        rpass.set_pipeline(&readback_pipeline);
-                        rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
-                        rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                        rpass.set_bind_group(0, &readback_bind_group, &[]);
-                        rpass.draw_indexed(0..target_index_len, 0, 0..1);
-                    }
+                let mut readback_buffer: Option<Arc<wgpu::Buffer>> = None; 
+                if !audio_chunk_send.is_full() { 
+                    readback_buffer = readback_buffers.pop();
+                    if let Some(ref readback_buffer) = readback_buffer {
+                        // Read back final row for audio
+                        // Draw final row into 1-pixel-high texture:
+                        {
+                            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: None,
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &readback_view,
+                                    resolve_target: None,
+                                    ops: DRAW_OPS,
+                                })],
+                                depth_stencil_attachment: None,
+                            });
+                            rpass.set_pipeline(&readback_pipeline);
+                            rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
+                            rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                            rpass.set_bind_group(0, &readback_bind_group, &[]);
+                            rpass.draw_indexed(0..target_index_len, 0, 0..1);
+                        }
 
-                    encoder.copy_texture_to_buffer(
-                        wgpu::ImageCopyTextureBase {
-                            texture: &readback_texture,
-                            mip_level:0,
-                            origin: wgpu::Origin3d { x:0,y:0,z:0 },
-                            aspect: wgpu::TextureAspect::All
-                        },
-                        wgpu::ImageCopyBuffer {
-                            buffer: &readback_buffer,
-                            layout: wgpu::ImageDataLayout {
-                                offset:0,
-                                bytes_per_row:None, // Not required, one row.
-                                rows_per_image:None, // Not required, texture not cubic.
-                            }
-                        },
-                        wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
-                    );
-                } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
+                        encoder.copy_texture_to_buffer(
+                            wgpu::ImageCopyTextureBase {
+                                texture: &readback_texture,
+                                mip_level:0,
+                                origin: wgpu::Origin3d { x:0,y:0,z:0 },
+                                aspect: wgpu::TextureAspect::All
+                            },
+                            wgpu::ImageCopyBuffer {
+                                buffer: &readback_buffer,
+                                layout: wgpu::ImageDataLayout {
+                                    offset:0,
+                                    bytes_per_row:None, // Not required, one row.
+                                    rows_per_image:None, // Not required, texture not cubic.
+                                }
+                            },
+                            wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
+                        );
+                    } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
+                }
 
                 // Done
                 queue.submit(Some(encoder.finish()));
@@ -740,7 +744,7 @@ fn main() {
     // Initialize audio before window
     const AUDIO_CHUNK_MAX_INFLIGHT: usize = 3;
     // Use sync_channel to prevent unlimited buildup
-    let (audio_chunk_send, audio_chunk_recv) = mpsc::sync_channel::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
+    let (audio_chunk_send, audio_chunk_recv) = crossbeam_channel::bounded::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
     
     let audio = crate::audio::audio_spawn(audio_chunk_recv);
 
