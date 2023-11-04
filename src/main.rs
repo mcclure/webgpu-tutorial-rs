@@ -73,6 +73,14 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
         .expect("Failed to find an appropriate adapter");
 
     // Create the logical device and command queue
+    let capabilities = surface.get_capabilities(&adapter);
+    let wgpu_format = capabilities // Find either our preferred capability or a fallback
+                    .formats
+                    .iter()
+                    .copied()
+                    .find(wgpu::TextureFormat::is_srgb)
+                    .or_else(|| capabilities.formats.first().copied())
+                    .expect("Get preferred format");
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
@@ -86,6 +94,13 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
         )
         .await
         .expect("Failed to create device");
+
+    // Setup iced
+    #[cfg(feature = "iced_debug")]
+    let mut debug = iced_winit::runtime::Debug::new();
+    let mut renderer = iced_wgpu::Renderer::new(
+        iced_wgpu::Backend::new(&device, &queue, iced_wgpu::Settings::default(), wgpu_format)
+    );
 
     // Load the shaders from disk
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {

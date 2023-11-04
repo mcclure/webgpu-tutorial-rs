@@ -2,6 +2,8 @@ This is a Rust+WebGPU "Hello world" dual-mode desktop/web app, based on the wgpu
 
 Run with `--features audio_log` to emit an on-disk live recording of the sound output. This is raw data (mono 32 bit floats) and can be opened with (for example) Audacity. It may not save correctly if the app crashes.
 
+This is a fork with an "iced"-based GUI overlay for tweaking constants. Run with `--features iced_debug` for additional iced debug overlay.
+
 Created by Andi McClure.
 
 [Build/usage instructions](run.txt)

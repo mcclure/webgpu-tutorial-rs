@@ -13,6 +13,9 @@ cpal = "0.15.2"
 crossbeam-channel = "0.5.8"
 divrem = "1.0.0"
 env_logger = "0.10.0"
+iced = "0.10.0"
+iced_wgpu = "0.11.1"
+iced_winit = "0.10.1"
 log = "0.4.17"
 pollster = "0.3.0"
 realfft = "3.3.0"
@@ -22,6 +25,7 @@ winit = "0.29.0-beta.0"
 
 [features]
 audio_log = []
+iced_debug = []
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3.61", features = ["Document", "Text"] }
