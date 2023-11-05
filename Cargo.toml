@@ -18,7 +18,9 @@ pollster = "0.3.0"
 realfft = "3.3.0"
 web-time = "0.2.0"
 wgpu = "0.16.2"
-winit = "0.29.0-beta.0"
+# "rwh_05" is mandatory for wgpu <=0.18 with winit 0.29.
+# When wgpu 0.19 is released, feature rwh_05 may be removed.
+winit = { version = "0.29.0", features = ["rwh_05"] }
 
 [features]
 audio_log = []

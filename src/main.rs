@@ -510,235 +510,231 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
     let fft_window:[f64;AUDIO_CHUNK_LEN] = apodize::hanning_iter(AUDIO_CHUNK_LEN).collect::<Vec<f64>>().try_into().unwrap();
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, target| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
         // the resources do not leak.
         let _ = (&instance, &adapter, &shader, &render_pipeline_layout, &fft, &fft_in, &fft_out);
 
-        *control_flow = if cfg!(feature = "metal-auto-capture") {
-            // We are running in a debugging tool, quit after 1 frame
-            ControlFlow::Exit
-        } else {
-            // Request continuous animation
-            ControlFlow::Poll
+        target.set_control_flow(ControlFlow::Poll);
+        if cfg!(feature = "metal-auto-capture") {
+            target.exit();
         };
 
         match event {
-            Event::WindowEvent {
-                event: WindowEvent::Resized(size),
-                ..
-            } => {
-                // Reconfigure the surface with the new size
-                (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
-                // On macos the window needs to be redrawn manually after resizing
-                window.request_redraw();
-            }
-            Event::RedrawRequested(_) => {
-                device.poll(wgpu::MaintainBase::Poll); // Flush out unmaps from last frames before doing any work. // FIXME: IS THIS ACTUALLY HELPFUL?
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::Resized(size) => {
+                    // Reconfigure the surface with the new size
+                    (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
+                    // On macos the window needs to be redrawn manually after resizing
+                    window.request_redraw();
+                }
+                WindowEvent::RedrawRequested => {
+                    device.poll(wgpu::MaintainBase::Poll); // Flush out unmaps from last frames before doing any work. // FIXME: IS THIS ACTUALLY HELPFUL?
 
-                let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                    let mut encoder =
+                            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-                const DRAW_OPS: wgpu::Operations<wgpu::Color> = wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                    store: true,
-                };
+                    const DRAW_OPS: wgpu::Operations<wgpu::Color> = wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: true,
+                    };
 
-                // Animate
-                {
-                    // Time frame is drawn at, for animation purposes
-                    let grid_current = Instant::now();
-                    // Time since last rowshift (in % of time to next rowshift)
-                    let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
-                    // Time-in-% is more than 100%
-                    if grid_time_offset > 1. {
-                        grid_time_offset %=  1.; // FIXME: What if it's more than 2?
-                        grid_last_reset = grid_current;
-                        grid_last_reset_overflow = grid_time_offset;
+                    // Animate
+                    {
+                        // Time frame is drawn at, for animation purposes
+                        let grid_current = Instant::now();
+                        // Time since last rowshift (in % of time to next rowshift)
+                        let mut grid_time_offset = grid_current.duration_since(grid_last_reset).as_secs_f32()*GRID_ANIMATE_SPEED + grid_last_reset_overflow;
+                        // Time-in-% is more than 100%
+                        if grid_time_offset > 1. {
+                            grid_time_offset %=  1.; // FIXME: What if it's more than 2?
+                            grid_last_reset = grid_current;
+                            grid_last_reset_overflow = grid_time_offset;
 
-                        // Begin this frame with a rowshift compute pass
-                        {
-                            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
-                            cpass.set_pipeline(&rowshift_pipeline);
-                            cpass.set_bind_group(0, &rowshift_bind_group, &[]);
-                            cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
+                            // Begin this frame with a rowshift compute pass
+                            {
+                                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                                cpass.set_pipeline(&rowshift_pipeline);
+                                cpass.set_bind_group(0, &rowshift_bind_group, &[]);
+                                cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
+                            }
+
+                            // Shifting up one row leaves an effectively blank space; fill it with new values
+                            // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
+                            {
+                                let mut mapped_bytes = grid_uv_staging_belt.write_buffer(&mut encoder, &grid_uv_buffer, grid_uv_staging_offset, grid_uv_staging_size, &device);
+                                random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(mapped_bytes.deref_mut()));
+                            }
+                            grid_uv_staging_belt.finish();
                         }
 
-                        // Shifting up one row leaves an effectively blank space; fill it with new values
-                        // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
-                        {
-                            let mut mapped_bytes = grid_uv_staging_belt.write_buffer(&mut encoder, &grid_uv_buffer, grid_uv_staging_offset, grid_uv_staging_size, &device);
-                            random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(mapped_bytes.deref_mut()));
-                        }
-                        grid_uv_staging_belt.finish();
+                        // Set animation (scroll) parameter
+                        // Notice: We may have already added passes to encoder, but those don't get submitted until cpass is "finished", so this write happens *before* any passes
+                        let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
+                        queue.write_buffer(&grid_uniform_buffer, 0, bytemuck::cast_slice(&pair));
                     }
 
-                    // Set animation (scroll) parameter
-                    // Notice: We may have already added passes to encoder, but those don't get submitted until cpass is "finished", so this write happens *before* any passes
-                    let pair:[f32;2] = [0., grid_time_offset*diagonal_texture_side_ndc];
-                    queue.write_buffer(&grid_uniform_buffer, 0, bytemuck::cast_slice(&pair));
-                }
+                    // Draw
+                    let frame = surface
+                        .get_current_texture()
+                        .expect("Failed to acquire next swap chain texture");
+                    let view = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
 
-                // Draw
-                let frame = surface
-                    .get_current_texture()
-                    .expect("Failed to acquire next swap chain texture");
-                let view = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
+                    // Initial draw of grid
+                    {
+                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &target_views[0],
+                                resolve_target: None,
+                                ops: DRAW_OPS,
+                            })],
+                            depth_stencil_attachment: None,
+                        });
+                        rpass.set_pipeline(&render_pipeline);
+                        rpass.set_vertex_buffer(0, grid_vertex_buffer.slice(..));
+                        rpass.set_vertex_buffer(1, grid_uv_buffer.slice(..));
+                        rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        rpass.set_bind_group(0, &grid_bind_group, &[]);
+                        rpass.draw_indexed(0..grid_index_len, 0, 0..1);
+                    }
 
-                // Initial draw of grid
-                {
-                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &target_views[0],
-                            resolve_target: None,
-                            ops: DRAW_OPS,
-                        })],
-                        depth_stencil_attachment: None,
-                    });
-                    rpass.set_pipeline(&render_pipeline);
-                    rpass.set_vertex_buffer(0, grid_vertex_buffer.slice(..));
-                    rpass.set_vertex_buffer(1, grid_uv_buffer.slice(..));
-                    rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    rpass.set_bind_group(0, &grid_bind_group, &[]);
-                    rpass.draw_indexed(0..grid_index_len, 0, 0..1);
-                }
+                    // Postprocessing passes
+                    for stage in 0..TARGET_PASSES {
+                        // All stages do one dimension in a separable blur-- except the last, which blur-then-thresholds.
+                        let final_stage = stage == TARGET_PASSES-1;
+                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: None,
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: if final_stage {
+                                        &view
+                                    } else {
+                                        &target_views[(stage+1)%2]
+                                    },
+                                resolve_target: None,
+                                ops: DRAW_OPS,
+                            })],
+                            depth_stencil_attachment: None,
+                        });
+                        rpass.set_pipeline(if final_stage { &target_final_pipeline } else { &target_pipeline });
+                        rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
+                        rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                        rpass.set_bind_group(0, &target_bind_groups[stage], &[]);
+                        rpass.draw_indexed(0..target_index_len, 0, 0..1);
+                    }
 
-                // Postprocessing passes
-                for stage in 0..TARGET_PASSES {
-                    // All stages do one dimension in a separable blur-- except the last, which blur-then-thresholds.
-                    let final_stage = stage == TARGET_PASSES-1;
-                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: if final_stage {
-                                    &view
-                                } else {
-                                    &target_views[(stage+1)%2]
-                                },
-                            resolve_target: None,
-                            ops: DRAW_OPS,
-                        })],
-                        depth_stencil_attachment: None,
-                    });
-                    rpass.set_pipeline(if final_stage { &target_final_pipeline } else { &target_pipeline });
-                    rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
-                    rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    rpass.set_bind_group(0, &target_bind_groups[stage], &[]);
-                    rpass.draw_indexed(0..target_index_len, 0, 0..1);
-                }
-
-                // Real quick see if we have any readback buffers returned
-                while let Ok(readback_buffer) = readback_buffer_recv.try_recv() {
-                    readback_buffers.push(readback_buffer);
-                }
-                // Don't bother with readback if audio is already busy
-                let mut readback_buffer: Option<Arc<wgpu::Buffer>> = None; 
-                if !audio_chunk_send.is_full() { 
-                    readback_buffer = readback_buffers.pop();
-                    if let Some(ref readback_buffer) = readback_buffer {
-                        // Read back final row for audio
-                        // Draw final row into 1-pixel-high texture:
-                        {
-                            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: None,
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                    view: &readback_view,
-                                    resolve_target: None,
-                                    ops: DRAW_OPS,
-                                })],
-                                depth_stencil_attachment: None,
-                            });
-                            rpass.set_pipeline(&readback_pipeline);
-                            rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
-                            rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                            rpass.set_bind_group(0, &readback_bind_group, &[]);
-                            rpass.draw_indexed(0..target_index_len, 0, 0..1);
-                        }
-
-                        encoder.copy_texture_to_buffer(
-                            wgpu::ImageCopyTextureBase {
-                                texture: &readback_texture,
-                                mip_level:0,
-                                origin: wgpu::Origin3d { x:0,y:0,z:0 },
-                                aspect: wgpu::TextureAspect::All
-                            },
-                            wgpu::ImageCopyBuffer {
-                                buffer: &readback_buffer,
-                                layout: wgpu::ImageDataLayout {
-                                    offset:0,
-                                    bytes_per_row:None, // Not required, one row.
-                                    rows_per_image:None, // Not required, texture not cubic.
-                                }
-                            },
-                            wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
-                        );
-                    } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
-                }
-
-                // Done
-                queue.submit(Some(encoder.finish()));
-
-                // If we submitted a readback above, queue up to service it when it's done
-                if let Some(readback_buffer) = readback_buffer {
-                    let slice = readback_buffer.slice(..);
-                    // Clone all Arcs that will be captured by the closure below
-                    let readback_buffer = readback_buffer.clone();
-                    let readback_buffer_send = readback_buffer_send.clone();
-                    let audio_chunk_send = audio_chunk_send.clone();
-                    let (fft, fft_in, fft_out) = (fft.clone(), fft_in.clone(), fft_out.clone());
-
-                    // The WebGPU spec says this promise resolves successfully only "after the completion of currently-enqueued operations that use 'this'", so this doubles as an on_submitted_work_done for these purposes.
-                    slice.map_async(wgpu::MapMode::Read, move |result| {
-                        if let Ok(()) = result {
-                            let slice = readback_buffer.slice(..);
-                            let (mut fft_in, mut fft_out) = (fft_in.borrow_mut(), fft_out.borrow_mut());
-
-                            let row = slice.get_mapped_range();
-                            let mut rng = rand::thread_rng(); // FIXME precompute this
-                            fft_in[0] = Default::default(); // Zero
-                            fft_in[AUDIO_READBACK_BUFFER_LEN-1] = Default::default(); // Zero
-                            for idx in 0..(AUDIO_READBACK_BUFFER_LEN-1) {
-                                let phase = rng.gen::<f64>() * 2. * std::f64::consts::PI;
-                                let ampl = 1. - row[idx] as f64/0xFF as f64;
-                                fft_in[idx+1] = realfft::num_complex::Complex { re:phase.cos()*ampl, im:phase.sin()*ampl };
+                    // Real quick see if we have any readback buffers returned
+                    while let Ok(readback_buffer) = readback_buffer_recv.try_recv() {
+                        readback_buffers.push(readback_buffer);
+                    }
+                    // Don't bother with readback if audio is already busy
+                    let mut readback_buffer: Option<Arc<wgpu::Buffer>> = None; 
+                    if !audio_chunk_send.is_full() { 
+                        readback_buffer = readback_buffers.pop();
+                        if let Some(ref readback_buffer) = readback_buffer {
+                            // Read back final row for audio
+                            // Draw final row into 1-pixel-high texture:
+                            {
+                                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                    label: None,
+                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: &readback_view,
+                                        resolve_target: None,
+                                        ops: DRAW_OPS,
+                                    })],
+                                    depth_stencil_attachment: None,
+                                });
+                                rpass.set_pipeline(&readback_pipeline);
+                                rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
+                                rpass.set_index_buffer(grid_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                                rpass.set_bind_group(0, &readback_bind_group, &[]);
+                                rpass.draw_indexed(0..target_index_len, 0, 0..1);
                             }
-                            fft.process(&mut fft_in, &mut fft_out).unwrap();
-                            // We're done except we want f32s
-                            let chunk:AudioChunk = array::from_fn(|idx| {
-                                (fft_out[idx]*fft_window[idx]) as f32 / 256.0 /* DIVISOR IS ARBITRARY FIXME */
-                            });
-                            let result = audio_chunk_send.try_send(Box::new(chunk));
-                            if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
-                        }
-                        readback_buffer.unmap();
-                        // Drop readback buffer in channel so it can be returned to pool.
-                        // Because there's an inherent cap on objects in the pool, this should never block.
-                        // The ok() safely erases a warning about dropped results (sometimes the other side is closed, and that's fine)
-                        readback_buffer_send.try_send(readback_buffer).ok();
-                    });
-                }
 
-                frame.present();
+                            encoder.copy_texture_to_buffer(
+                                wgpu::ImageCopyTextureBase {
+                                    texture: &readback_texture,
+                                    mip_level:0,
+                                    origin: wgpu::Origin3d { x:0,y:0,z:0 },
+                                    aspect: wgpu::TextureAspect::All
+                                },
+                                wgpu::ImageCopyBuffer {
+                                    buffer: &readback_buffer,
+                                    layout: wgpu::ImageDataLayout {
+                                        offset:0,
+                                        bytes_per_row:None, // Not required, one row.
+                                        rows_per_image:None, // Not required, texture not cubic.
+                                    }
+                                },
+                                wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
+                            );
+                        } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
+                    }
+
+                    // Done
+                    queue.submit(Some(encoder.finish()));
+
+                    // If we submitted a readback above, queue up to service it when it's done
+                    if let Some(readback_buffer) = readback_buffer {
+                        let slice = readback_buffer.slice(..);
+                        // Clone all Arcs that will be captured by the closure below
+                        let readback_buffer = readback_buffer.clone();
+                        let readback_buffer_send = readback_buffer_send.clone();
+                        let audio_chunk_send = audio_chunk_send.clone();
+                        let (fft, fft_in, fft_out) = (fft.clone(), fft_in.clone(), fft_out.clone());
+
+                        // The WebGPU spec says this promise resolves successfully only "after the completion of currently-enqueued operations that use 'this'", so this doubles as an on_submitted_work_done for these purposes.
+                        slice.map_async(wgpu::MapMode::Read, move |result| {
+                            if let Ok(()) = result {
+                                let slice = readback_buffer.slice(..);
+                                let (mut fft_in, mut fft_out) = (fft_in.borrow_mut(), fft_out.borrow_mut());
+
+                                let row = slice.get_mapped_range();
+                                let mut rng = rand::thread_rng(); // FIXME precompute this
+                                fft_in[0] = Default::default(); // Zero
+                                fft_in[AUDIO_READBACK_BUFFER_LEN-1] = Default::default(); // Zero
+                                for idx in 0..(AUDIO_READBACK_BUFFER_LEN-1) {
+                                    let phase = rng.gen::<f64>() * 2. * std::f64::consts::PI;
+                                    let ampl = 1. - row[idx] as f64/0xFF as f64;
+                                    fft_in[idx+1] = realfft::num_complex::Complex { re:phase.cos()*ampl, im:phase.sin()*ampl };
+                                }
+                                fft.process(&mut fft_in, &mut fft_out).unwrap();
+                                // We're done except we want f32s
+                                let chunk:AudioChunk = array::from_fn(|idx| {
+                                    (fft_out[idx]*fft_window[idx]) as f32 / 256.0 /* DIVISOR IS ARBITRARY FIXME */
+                                });
+                                let result = audio_chunk_send.try_send(Box::new(chunk));
+                                if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
+                            }
+                            readback_buffer.unmap();
+                            // Drop readback buffer in channel so it can be returned to pool.
+                            // Because there's an inherent cap on objects in the pool, this should never block.
+                            // The ok() safely erases a warning about dropped results (sometimes the other side is closed, and that's fine)
+                            readback_buffer_send.try_send(readback_buffer).ok();
+                        });
+                    }
+
+                    frame.present();
+                }
+                WindowEvent::CloseRequested => {
+                    target.exit();
+                }
+                _ => {}
             }
             // The winit docs recommend doing your "state update" in MainEventsCleared and your draw triggering/logic here.
-            Event::RedrawEventsCleared => {
-                window.request_redraw()
+            Event::AboutToWait => {
+                window.request_redraw();
             }
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
             _ => {}
         }
     });
 }
 
 fn main() {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
     // Initialize audio before window
