@@ -248,10 +248,12 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                            store: true,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
                     depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None
                 });
                 rpass.set_pipeline(&diagonal_render_pipeline);
                 rpass.set_vertex_buffer(0, diagonal_vertex_buffer.slice(..));
@@ -537,7 +539,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
                     const DRAW_OPS: wgpu::Operations<wgpu::Color> = wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                        store: true,
+                        store: wgpu::StoreOp::Store,
                     };
 
                     // Animate
@@ -554,7 +556,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
                             // Begin this frame with a rowshift compute pass
                             {
-                                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None });
+                                let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: None, timestamp_writes: None });
                                 cpass.set_pipeline(&rowshift_pipeline);
                                 cpass.set_bind_group(0, &rowshift_bind_group, &[]);
                                 cpass.dispatch_workgroups(1, 1, 1); // Number of cells to run, the (x,y,z) size of item being processed
@@ -593,6 +595,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                                 ops: DRAW_OPS,
                             })],
                             depth_stencil_attachment: None,
+                            occlusion_query_set: None,
+                            timestamp_writes: None,
                         });
                         rpass.set_pipeline(&render_pipeline);
                         rpass.set_vertex_buffer(0, grid_vertex_buffer.slice(..));
@@ -618,6 +622,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                                 ops: DRAW_OPS,
                             })],
                             depth_stencil_attachment: None,
+                            occlusion_query_set: None,
+                            timestamp_writes: None
                         });
                         rpass.set_pipeline(if final_stage { &target_final_pipeline } else { &target_pipeline });
                         rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
@@ -646,6 +652,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                                         ops: DRAW_OPS,
                                     })],
                                     depth_stencil_attachment: None,
+                                    occlusion_query_set: None,
+                                    timestamp_writes: None
                                 });
                                 rpass.set_pipeline(&readback_pipeline);
                                 rpass.set_vertex_buffer(0, target_vertex_buffer.slice(..));
