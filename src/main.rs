@@ -730,7 +730,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
             }
             _ => {}
         }
-    });
+    }).unwrap(); // event_loop.run() can fail
 }
 
 fn main() {
