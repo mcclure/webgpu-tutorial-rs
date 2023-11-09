@@ -5,6 +5,9 @@ mod boilerplate;
 mod constants;
 mod diagonal;
 
+#[cfg(feature = "iced_debug")]
+mod iced_debug;
+
 use std::array;
 use std::borrow::Cow;
 use std::mem;
@@ -97,9 +100,27 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
     // Setup iced
     #[cfg(feature = "iced_debug")]
-    let mut debug = iced_winit::runtime::Debug::new();
-    let mut renderer: iced_graphics::Renderer<iced_wgpu::Backend, iced::Theme> = iced_wgpu::Renderer::new(
+    let mut iced_debug_debug = iced_winit::runtime::Debug::new();
+    #[cfg(feature = "iced_debug")]
+    let mut iced_renderer: iced_graphics::Renderer<iced_wgpu::Backend, iced::Theme> = iced_wgpu::Renderer::new(
         iced_wgpu::Backend::new(&device, &queue, iced_wgpu::Settings::default(), wgpu_format)
+    );
+    #[cfg(feature = "iced_debug")]
+    let mut iced_viewport = {
+        let physical_size = window.inner_size();
+        iced_wgpu::graphics::Viewport::with_physical_size(
+            iced_winit::core::Size::new(physical_size.width, physical_size.height),
+            window.scale_factor(),
+        )
+    };
+    #[cfg(feature = "iced_debug")]
+    let debug_controls = iced_debug::DebugControls::new();
+    #[cfg(feature = "iced_debug")]
+    let mut iced_state = iced_winit::runtime::program::State::new(
+        debug_controls,
+        iced_viewport.logical_size(),
+        &mut iced_renderer,
+        &mut iced_debug_debug,
     );
 
     // Load the shaders from disk
@@ -688,6 +709,21 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                             );
                         } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
                     }
+
+                    // And then iced on top
+                    #[cfg(feature = "iced_debug")]
+                    iced_renderer.with_primitives(|backend, primitive| {
+                        backend.present(
+                            &device,
+                            &queue,
+                            &mut encoder,
+                            None,
+                            &view,
+                            primitive,
+                            &iced_viewport,
+                            &iced_debug_debug.overlay(),
+                        );
+                    });
 
                     // Done
                     queue.submit(Some(encoder.finish()));

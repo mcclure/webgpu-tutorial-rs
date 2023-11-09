@@ -3533,6 +3533,7 @@ dependencies = [
  "iced",
  "iced_graphics",
  "iced_wgpu",
+ "iced_widget",
  "iced_winit",
  "log",
  "pollster",
