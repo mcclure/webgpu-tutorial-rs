@@ -35,7 +35,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
     let size = window.inner_size();
 
-    let instance = wgpu::Instance::default();
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: wgpu::Backends::GL, flags: Default::default(), dx12_shader_compiler: Default::default(), gles_minor_version: Default::default() });
 
     let surface = unsafe { instance.create_surface(&window) };
 
@@ -71,6 +71,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
         })
         .await
         .expect("Failed to find an appropriate adapter");
+    println!("Adapter info {:?}", adapter.get_info());
 
     // Create the logical device and command queue
     let (device, queue) = adapter
