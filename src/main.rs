@@ -37,7 +37,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
 
     let instance = wgpu::Instance::default();
 
-    let surface = unsafe { instance.create_surface(&window) };
+    let surface = instance.create_surface(&window);
 
     // If window create failed on web, assume webgpu versioning is the cause.
     #[cfg(target_arch="wasm32")]
@@ -77,9 +77,9 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
-                features: wgpu::Features::empty(),
+                required_features: wgpu::Features::empty(),
                 // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-                limits: wgpu::Limits::downlevel_defaults()
+                required_limits: wgpu::Limits::downlevel_defaults()
                     .using_resolution(adapter.limits()),
             },
             None,
@@ -224,6 +224,11 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: swapchain_capabilities.alpha_modes[0],
             view_formats: vec![],
+
+            // This is fiddly:
+            // Code which is interactive (needs low latency) should set 1 here.
+            // This app is noninteractive so we pick 2 for smoothness.
+            desired_maximum_frame_latency: 2
         };
 
         surface.configure(&device, &config);
@@ -511,6 +516,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
     let mut grid_last_reset_overflow = 0.;
 
     let fft_window:[f64;AUDIO_CHUNK_LEN] = apodize::hanning_iter(AUDIO_CHUNK_LEN).collect::<Vec<f64>>().try_into().unwrap();
+    let window = &window; // event_loop should borrow, not move this
 
     event_loop.run(move |event, target| {
         // Have the closure take ownership of the resources.
