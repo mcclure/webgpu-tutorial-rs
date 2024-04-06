@@ -518,6 +518,9 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
     let fft_window:[f64;AUDIO_CHUNK_LEN] = apodize::hanning_iter(AUDIO_CHUNK_LEN).collect::<Vec<f64>>().try_into().unwrap();
     let window = &window; // event_loop should borrow, not move this
 
+    #[cfg(feature="keyboard_tune")]
+    let mut modifiers: winit::event::Modifiers = Default::default();
+
     event_loop.run(move |event, target| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
@@ -736,6 +739,38 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                 WindowEvent::CloseRequested => {
                     target.exit();
                 }
+
+                #[cfg(feature="keyboard_tune")]
+                WindowEvent::ModifiersChanged(new_modifiers) => {
+                    modifiers = new_modifiers;
+                }
+
+                #[cfg(feature="keyboard_tune")]
+                WindowEvent::KeyboardInput { event:winit::event::KeyEvent {logical_key, state, ..}, .. } => {
+                    use winit::event::ElementState;
+                    use winit::keyboard::{Key, NamedKey, ModifiersState};
+                    let mut strong = modifiers.state().contains(ModifiersState::SHIFT);
+                    let mut flow:[i32;2] = Default::default(); // 2 parameters
+                    if state == ElementState::Pressed { // On release we do nothing
+                        match logical_key {
+                            Key::Named(NamedKey::ArrowDown) => {
+                                flow[0] = -1;
+                            }
+                            Key::Named(NamedKey::ArrowUp) => {
+                                flow[0] = 1;
+                            }
+                            Key::Named(NamedKey::ArrowLeft) => {
+                                flow[1] = -1;
+                            }
+                            Key::Named(NamedKey::ArrowRight) => {
+                                flow[1] = 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    println!("Keypress {flow:?}, {strong}"); // TODO
+                }
+
                 _ => {}
             }
             // The winit docs recommend doing your "state update" in MainEventsCleared and your draw triggering/logic here.
