@@ -13,6 +13,7 @@ use std::num::NonZeroU64;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
+use cfg_if::cfg_if;
 #[cfg(feature="audio")]
 use crossbeam_channel::bounded;
 use divrem::DivCeil;
@@ -221,14 +222,15 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         }
     }
 
-    #[cfg(feature="audio")]
-    type ReadbackBufferSend = crossbeam_channel::Sender<Arc<wgpu::Buffer>>;
-    #[cfg(feature="audio")]
-    type ReadbackBufferRecv = crossbeam_channel::Receiver<Arc<wgpu::Buffer>>;
-    #[cfg(not(feature="audio"))]
-    type ReadbackBufferSend = ();
-    #[cfg(not(feature="audio"))]
-    type ReadbackBufferRecv = ();
+    cfg_if::cfg_if! {
+        if #[cfg(feature="audio")] {
+            type ReadbackBufferSend = crossbeam_channel::Sender<Arc<wgpu::Buffer>>;
+            type ReadbackBufferRecv = crossbeam_channel::Receiver<Arc<wgpu::Buffer>>;
+        } else {
+            type ReadbackBufferSend = ();
+            type ReadbackBufferRecv = ();
+        }
+    }
 
     fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
         // Set size
@@ -547,7 +549,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         let _ = (&instance, &adapter, &shader, &render_pipeline_layout, &fft, &fft_in, &fft_out);
 
         target.set_control_flow(ControlFlow::Poll);
-        if cfg!(feature = "metal-auto-capture") {
+        if cfg!(feature="metal-auto-capture") {
             target.exit();
         };
 
@@ -808,17 +810,19 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
-    // Initialize audio before window
-    #[cfg(feature="audio")]
-    const AUDIO_CHUNK_MAX_INFLIGHT: usize = 3;
-    // Use sync_channel to prevent unlimited buildup
-    #[cfg(feature="audio")]
-    let (audio_chunk_send, audio_chunk_recv) = crossbeam_channel::bounded::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
-    #[cfg(not(feature="audio"))]
-    let audio_chunk_send = ();
+    cfg_if! {
+        if #[cfg(feature="audio")] {
+            // Initialize audio before window
+            const AUDIO_CHUNK_MAX_INFLIGHT: usize = 3;
 
-    #[cfg(feature="audio")]
-    let audio = crate::audio::audio_spawn(audio_chunk_recv);
+            // Use sync_channel to prevent unlimited buildup
+            let (audio_chunk_send, audio_chunk_recv) = crossbeam_channel::bounded::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
+
+            let audio = crate::audio::audio_spawn(audio_chunk_recv);
+        } else {
+            let audio_chunk_send = ();
+        }
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
