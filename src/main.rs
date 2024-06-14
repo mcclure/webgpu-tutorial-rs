@@ -1,5 +1,6 @@
 // Entry point
 
+#[cfg(feature="audio")]
 mod audio;
 mod boilerplate;
 mod constants;
@@ -12,6 +13,7 @@ use std::num::NonZeroU64;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use atomic_refcell::AtomicRefCell;
+#[cfg(feature="audio")]
 use crossbeam_channel::bounded;
 use divrem::DivCeil;
 use rand::Rng;
@@ -30,7 +32,12 @@ use crate::boilerplate::*;
 use crate::constants::*;
 use crate::diagonal::*;
 
-async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossbeam_channel::Sender<Box<AudioChunk>>) {
+#[cfg(feature="audio")]
+type AudioChunkSend = crossbeam_channel::Sender<Box<AudioChunk>>;
+#[cfg(not(feature="audio"))]
+type AudioChunkSend = ();
+
+async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioChunkSend) {
     // ----------------------- Basic setup ----------------------
 
     let size = window.inner_size();
@@ -214,7 +221,16 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
         }
     }
 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, crossbeam_channel::Sender<Arc<wgpu::Buffer>>, crossbeam_channel::Receiver<Arc<wgpu::Buffer>>) {
+    #[cfg(feature="audio")]
+    type ReadbackBufferSend = crossbeam_channel::Sender<Arc<wgpu::Buffer>>;
+    #[cfg(feature="audio")]
+    type ReadbackBufferRecv = crossbeam_channel::Receiver<Arc<wgpu::Buffer>>;
+    #[cfg(not(feature="audio"))]
+    type ReadbackBufferSend = ();
+    #[cfg(not(feature="audio"))]
+    type ReadbackBufferRecv = ();
+
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -432,7 +448,10 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
             })));
         }
         // Using sync_channel because it's theoretically more efficient and we can't overflow it.
+        #[cfg(feature="audio")]
         let (readback_buffer_send, readback_buffer_recv) = crossbeam_channel::bounded::<Arc<wgpu::Buffer>>(AUDIO_READBACK_BUFFER_MAX_INFLIGHT);
+        #[cfg(not(feature="audio"))]
+        let (readback_buffer_send, readback_buffer_recv) = ((), ());
 
         // Bind group for write into read-back texture
         // Can't use texture_bind_group because no parameters
@@ -642,11 +661,13 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                     }
 
                     // Real quick see if we have any readback buffers returned
+                    #[cfg(feature="audio")]
                     while let Ok(readback_buffer) = readback_buffer_recv.try_recv() {
                         readback_buffers.push(readback_buffer);
                     }
                     // Don't bother with readback if audio is already busy
-                    let mut readback_buffer: Option<Arc<wgpu::Buffer>> = None; 
+                    let mut readback_buffer: Option<Arc<wgpu::Buffer>> = None;
+                    #[cfg(feature="audio")]
                     if !audio_chunk_send.is_full() { 
                         readback_buffer = readback_buffers.pop();
                         if let Some(ref readback_buffer) = readback_buffer {
@@ -695,6 +716,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: crossb
                     queue.submit(Some(encoder.finish()));
 
                     // If we submitted a readback above, queue up to service it when it's done
+                    #[cfg(feature="audio")]
                     if let Some(readback_buffer) = readback_buffer {
                         let slice = readback_buffer.slice(..);
                         // Clone all Arcs that will be captured by the closure below
@@ -787,10 +809,15 @@ fn main() {
     let window = winit::window::Window::new(&event_loop).unwrap();
 
     // Initialize audio before window
+    #[cfg(feature="audio")]
     const AUDIO_CHUNK_MAX_INFLIGHT: usize = 3;
     // Use sync_channel to prevent unlimited buildup
+    #[cfg(feature="audio")]
     let (audio_chunk_send, audio_chunk_recv) = crossbeam_channel::bounded::<Box<AudioChunk>>(AUDIO_CHUNK_MAX_INFLIGHT);
-    
+    #[cfg(not(feature="audio"))]
+    let audio_chunk_send = ();
+
+    #[cfg(feature="audio")]
     let audio = crate::audio::audio_spawn(audio_chunk_recv);
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -811,6 +838,7 @@ fn main() {
                     .ok()
             })
             .expect("couldn't append canvas to document body");
+        #[cfg(feature="audio")]
         wasm_bindgen_futures::spawn_local(run(event_loop, window, audio_chunk_send));
     }
 }
