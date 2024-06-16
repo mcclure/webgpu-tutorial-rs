@@ -33,6 +33,8 @@ use crate::boilerplate::*;
 use crate::constants::*;
 use crate::diagonal::*;
 
+// Crossbeam is used to send data from the video renderer to the audio renderer,
+// but when audio is disabled we disable Crossbeam also.
 #[cfg(feature="audio")]
 type AudioChunkSend = crossbeam_channel::Sender<Box<AudioChunk>>;
 #[cfg(not(feature="audio"))]
@@ -43,6 +45,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 
     let size = window.inner_size();
 
+    // The Instance will give us an Adapter which gives us a Device.
+    // The Instance and Device will be our main ways of interacting with wgpu.
     let instance = wgpu::Instance::default();
 
     let surface = instance.create_surface(&window);
@@ -65,7 +69,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                     })
                     .expect("couldn't append canvas to document body")
             ));
-        return
+        return // Done
     }
 
     let surface = surface.unwrap();
@@ -114,9 +118,10 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
     // Throw away diagonal pipeline layout, we will not be attaching bind groups
     let (_, diagonal_render_pipeline) = make_pipeline(&device, &shader, &[], "vs_plain", &[diagonal_vertex_layout], "fs_plain", &[Some(wgpu::TextureFormat::R8Unorm.into())], "diagonal");
 
+    // Bind layout for drawing the grid of textures
     let grid_bind_group_layout = make_texture_bind_group_layout(&device, &[
         wgpu::BindGroupLayoutEntry {
-            binding: 2,
+            binding: 2, // Binding numbers are self-assigned and correspond to shader.wgsl entries.
             visibility: wgpu::ShaderStages::VERTEX,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
@@ -126,6 +131,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
             count: None,
         }], "Grid");
 
+    // Bind layout for drawing a single fullscreen texture with an "effect"
     let target_bind_group_layout = make_texture_bind_group_layout(&device, &[
         wgpu::BindGroupLayoutEntry {
             binding: 2,
@@ -138,6 +144,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
             count: None,
         }], "Target");
 
+    // Bind layout for compute shader that memcpys within a buffer 
     let rowshift_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Row shift bind group layout"),
         entries: &[
@@ -164,10 +171,13 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         ]
     });
 
+    // Bind layout for reading a texture off the GPU into Rust (for audio)
     let readback_bind_group_layout = make_texture_bind_group_layout(&device, &[], "Readback");
 
+    // Everything we do will use the same sampler object
     let default_sampler = make_sampler(&device);
 
+    // Parameter storage for drawing the grid of textures
     const ZERO_ZERO_F32: [f32; 2] = [0.,0.];
     let grid_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Grid Uniform Buffer"),
@@ -175,13 +185,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    const ZERO_U32: [u32; 1] = [0];
-    let rowshift_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Row shift shift Uniform Buffer"),
-        contents: bytemuck::cast_slice(&ZERO_U32),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
+    // Parameter storage for drawing a single fullscreen texture with an "effect"
     const TARGET_PASSES:usize = 8;
     let target_uniform_buffers: [wgpu::Buffer; TARGET_PASSES] = array::from_fn(|idx|
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -191,10 +195,21 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         })
     );
 
-    // Triangle order for a quad in grid or target passes
+    // Parameter storage for compute shader that memcpys within a buffer 
+    const ZERO_U32: [u32; 1] = [0];
+    let rowshift_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Row shift shift Uniform Buffer"),
+        contents: bytemuck::cast_slice(&ZERO_U32),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    // Vertex order for a quad made of triangles in grid or target passes
     const GRID_INDEX_BASE : [u16;6] = [0, 2, 1,
                                        1, 2, 3];
 
+    // Audio buffers are filled out by the display code, sent over crossbeam,
+    // then used and sent back (to avoid new allocations). This sets the max
+    // number of audio buffers in this little loop.
     // FIXME: Add some way to set this to 0 at runtime (for a "mute").
     const AUDIO_READBACK_BUFFER_MAX_INFLIGHT:usize = 2;
 
@@ -202,6 +217,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
     fn random_uv_push(grid_uv: &mut [f32]) {
         let mut rng = rand::thread_rng();
 
+        // Texture UVs for the four corners of a quad
         const GRID_UV_BASE: [f32;8] = [
             0., 0.,
             0., 1.,
@@ -222,6 +238,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         }
     }
 
+    // See AudioChunkSend above
     cfg_if::cfg_if! {
         if #[cfg(feature="audio")] {
             type ReadbackBufferSend = crossbeam_channel::Sender<Arc<wgpu::Buffer>>;
@@ -232,6 +249,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         }
     }
 
+    // Call this function to initialize/re-initialize the "permanent" state 
     fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
         // Set size
         let config = wgpu::SurfaceConfiguration {
@@ -476,12 +494,15 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size).unwrap(), target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv)
     }
 
+    // Call generate_resize for first time
     let (mut diagonal_texture_side, mut diagonal_texture_side_ndc, mut diagonal_texture_count_x, mut diagonal_texture_count_y, mut diagonal_texture, mut grid_vertex_buffer, mut grid_uv_buffer, mut grid_index_buffer, mut grid_index_len, mut grid_bind_group, mut rowshift_bind_group, mut grid_uv_staging_belt, mut grid_uv_staging_offset, mut grid_uv_staging_size, mut target_views, mut target_bind_groups, mut readback_texture, mut readback_view, mut readback_bind_group, mut readback_buffers, mut readback_buffer_send, mut readback_buffer_recv) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
 
     // ------ Data/operations for frame draw ------
 
+    // Pipeline for drawing the grid of textures
     let (render_pipeline_layout, render_pipeline) = make_pipeline(&device, &shader, &[&grid_bind_group_layout], "vs_textured_offset", &[VEC2_LAYOUT, VEC2_LAYOUT_LOCATION_1], "fs_textured", &[Some(wgpu::TextureFormat::R8Unorm.into())], "grid");
 
+    // Pipeline for compute shader that memcpys within a buffer
     let rowshift_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("Row shift pipeline"),
         layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -493,9 +514,11 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         entry_point: "internal_copy",
     });
 
+    // Pipeline(s) for drawing a single fullscreen texture with an "effect"
     let (target_pipeline_layout, target_pipeline) = make_pipeline(&device, &shader, &[&target_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_postprocess_blur", &[Some(wgpu::TextureFormat::R8Unorm.into())], "target-blur");
     let (target_final_pipeline_layout, target_final_pipeline) = make_pipeline(&device, &shader, &[&target_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_postprocess_blur_threshold", &[Some(swapchain_format.into())], "target-blur-threshold");
 
+    // FIXME: These comments don't seem to be correct
     let (target_vertex_buffer, target_index_buffer, target_index_len) = {
         // Combined vertex and UV for a full-screen quad
         const TARGET_VERTEX : [f32;16] = [
@@ -523,8 +546,10 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         (target_vertex_buffer, target_index_buffer, 6)
     };
 
+    // Pipeline for reading a texture off the GPU into Rust (for audio)
     let (readback_pipeline_layout, readback_pipeline) = make_pipeline(&device, &shader, &[&readback_bind_group_layout], "vs_textured", &[VEC2X2_LAYOUT], "fs_textured_readback", &[Some(wgpu::TextureFormat::R8Unorm.into())], "readback");
 
+    // FFT state for audio
     let mut fft_planner = realfft::RealFftPlanner::<f64>::new();
     let fft = Arc::new(fft_planner.plan_fft_inverse(AUDIO_READBACK_BUFFER_LEN*2));
     // We'd like to reuse these buffers, but the Wgpu callback thinks it's running on another thread (per the documentation, it's not)
@@ -533,12 +558,15 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
     let fft_in = Arc::new(AtomicRefCell::new(fft.make_input_vec()));
     let fft_out = Arc::new(AtomicRefCell::new(fft.make_output_vec()));
 
-    let mut grid_last_reset = Instant::now();
-    let mut grid_last_reset_overflow = 0.;
-
+    // FFT chunks will be multiplied by this "window function" so we don't get clicks at edges
     let fft_window:[f64;AUDIO_CHUNK_LEN] = apodize::hanning_iter(AUDIO_CHUNK_LEN).collect::<Vec<f64>>().try_into().unwrap();
     let window = &window; // event_loop should borrow, not move this
 
+    // Timers for animation
+    let mut grid_last_reset = Instant::now();
+    let mut grid_last_reset_overflow = 0.;
+
+    // Track shift, ctrl etc
     #[cfg(feature="keyboard_tune")]
     let mut modifiers: winit::event::Modifiers = Default::default();
 
@@ -548,25 +576,32 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         // the resources do not leak.
         let _ = (&instance, &adapter, &shader, &render_pipeline_layout, &fft, &fft_in, &fft_out);
 
+        // Very important: Force animation even when no events are coming in
         target.set_control_flow(ControlFlow::Poll);
+
+        // We're in Apple's Metal debugger, bail after 1 frame
         if cfg!(feature="metal-auto-capture") {
             target.exit();
         };
 
         match event {
             Event::WindowEvent { event, .. } => match event {
+
                 WindowEvent::Resized(size) => {
                     // Reconfigure the surface with the new size
                     (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_uniform_buffers, &readback_bind_group_layout);
                     // On macos the window needs to be redrawn manually after resizing
                     window.request_redraw();
                 }
+
                 WindowEvent::RedrawRequested => {
                     device.poll(wgpu::MaintainBase::Poll); // Flush out unmaps from last frames before doing any work. // FIXME: IS THIS ACTUALLY HELPFUL?
 
+                    // We will attempt to do exactly 1 queue submit with exactly 1 encoder
                     let mut encoder =
                             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+                    // Used in begin_render_pass-es later
                     const DRAW_OPS: wgpu::Operations<wgpu::Color> = wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                         store: wgpu::StoreOp::Store,
@@ -607,7 +642,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                         queue.write_buffer(&grid_uniform_buffer, 0, bytemuck::cast_slice(&pair));
                     }
 
-                    // Draw
+                    // Texture and view to draw into
                     let frame = surface
                         .get_current_texture()
                         .expect("Failed to acquire next swap chain texture");
@@ -615,7 +650,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
-                    // Initial draw of grid
+                    // Initial draw of grid into target_views[0]
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: None,
@@ -636,7 +671,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                         rpass.draw_indexed(0..grid_index_len, 0, 0..1);
                     }
 
-                    // Postprocessing passes
+                    // Postprocessing passes, target_views[n] -> target_views[n+1] -> framebuffer on final pass
                     for stage in 0..TARGET_PASSES {
                         // All stages do one dimension in a separable blur-- except the last, which blur-then-thresholds.
                         let final_stage = stage == TARGET_PASSES-1;
@@ -662,7 +697,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                         rpass.draw_indexed(0..target_index_len, 0, 0..1);
                     }
 
-                    // Real quick see if we have any readback buffers returned
+                    // Real quick see if we have any readback buffers available to write into
                     #[cfg(feature="audio")]
                     while let Ok(readback_buffer) = readback_buffer_recv.try_recv() {
                         readback_buffers.push(readback_buffer);
@@ -694,6 +729,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                                 rpass.draw_indexed(0..target_index_len, 0, 0..1);
                             }
 
+                            // Convert the texture into a buffer object, so we can get at it:
                             encoder.copy_texture_to_buffer(
                                 wgpu::ImageCopyTextureBase {
                                     texture: &readback_texture,
@@ -731,35 +767,45 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                         slice.map_async(wgpu::MapMode::Read, move |result| {
                             if let Ok(()) = result {
                                 let slice = readback_buffer.slice(..);
-                                let (mut fft_in, mut fft_out) = (fft_in.borrow_mut(), fft_out.borrow_mut());
+                                let row = slice.get_mapped_range(); // Readable pixel data
 
-                                let row = slice.get_mapped_range();
-                                let mut rng = rand::thread_rng(); // FIXME precompute this
+                                // We will do an inverse FFT to transform the pixel data into something we can listen to
+                                // Pixels are frequency domain strengths, time domain will be our pcm data 
+                                let (mut fft_in, mut fft_out) = (fft_in.borrow_mut(), fft_out.borrow_mut());
+                                let mut rng = rand::thread_rng(); // FIXME instead of realtime random precompute some buffers of FFTed white noise
+
+                                // We can't use the pixel data directly; we need to doctor something that looks like a frequency series
                                 fft_in[0] = Default::default(); // Zero
                                 fft_in[AUDIO_READBACK_BUFFER_LEN-1] = Default::default(); // Zero
                                 for idx in 0..(AUDIO_READBACK_BUFFER_LEN-1) {
+                                    // To get a nice white noise spectrum, we will select a random phase for each bin
+                                    // and in each bin write a complex number with the random phase times the pixel power
                                     let phase = rng.gen::<f64>() * 2. * std::f64::consts::PI;
                                     let ampl = 1. - row[idx] as f64/0xFF as f64;
                                     fft_in[idx+1] = realfft::num_complex::Complex { re:phase.cos()*ampl, im:phase.sin()*ampl };
                                 }
+                                // Pass our doctored data through the ifft
                                 fft.process(&mut fft_in, &mut fft_out).unwrap();
-                                // We're done except we want f32s
+                                // Final step: Convert to f32 AND we want to apply the precomputed window function to our time series
                                 let chunk:AudioChunk = array::from_fn(|idx| {
                                     (fft_out[idx]*fft_window[idx]) as f32 / 256.0 /* DIVISOR IS ARBITRARY FIXME */
                                 });
                                 let result = audio_chunk_send.try_send(Box::new(chunk));
+                                // FIXME this prints all the time when it shouldn't
                                 if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
                             }
                             readback_buffer.unmap();
                             // Drop readback buffer in channel so it can be returned to pool.
                             // Because there's an inherent cap on objects in the pool, this should never block.
                             // The ok() safely erases a warning about dropped results (sometimes the other side is closed, and that's fine)
+                            // FIXME 2024-06-16: Why did I write this comment saying the other side being closed is fine?? Is it fine?? Why??)
                             readback_buffer_send.try_send(readback_buffer).ok();
                         });
                     }
 
                     frame.present();
                 }
+
                 WindowEvent::CloseRequested => {
                     target.exit();
                 }
@@ -792,7 +838,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                             _ => {}
                         }
                     }
-                    println!("Keypress {flow:?}, {strong}"); // TODO
+                    println!("Keypress {flow:?}, {strong}"); // TODO: Something with Flow
                 }
 
                 _ => {}
@@ -807,9 +853,11 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 }
 
 fn main() {
+    // Initialize window
     let event_loop = EventLoop::new().unwrap();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
+    // Initialize audio thread and send it a crossbeam so we can talk to it
     cfg_if! {
         if #[cfg(feature="audio")] {
             // Initialize audio before window
@@ -824,11 +872,13 @@ fn main() {
         }
     }
 
+    // On desktop we just drop into the event loop now
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
         pollster::block_on(run(event_loop, window, audio_chunk_send));
     }
+    // On web starting up is more complex, and can fail
     #[cfg(target_arch = "wasm32")]
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
