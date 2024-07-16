@@ -281,7 +281,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         }
     }
 
-    let mut target_threshold_params = [0.65f32, 0.05f32];
+    let mut target_threshold_params = [0f32, 0f32];
 
     // Call this function to initialize/re-initialize the "permanent" state 
     fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, f32x2_uniform_alignment:u64, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_final_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], target_threshold_params:&[f32;2], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
@@ -308,6 +308,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         // Decide how big the diagonal texture should be
         // TODO: What should TILES_ACROSS be? Should TILES_ACROSS depend on window DPI?
         let diagonal_texture_side = std::cmp::min(DivCeil::div_ceil(size.height, TILES_ACROSS), DivCeil::div_ceil(size.width, TILES_ACROSS));
+        let diagonal_full_side = diagonal_texture_side*TILES_ACROSS;
 
         let (diagonal_texture, diagonal_view) = make_texture_gray(&device, diagonal_texture_side, diagonal_texture_side, true, false, "diagonal-texture");
 
@@ -508,6 +509,15 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
             )
         });
 
+        // "Good looking" values were discovered experimentally.
+        let threshold_params = [
+            -0.0001617f32 * diagonal_full_side as f32 + 0.9113f32 + target_threshold_params[0],
+            0.00003602f32 * diagonal_full_side as f32 - 0.001497f32 + target_threshold_params[1]
+        ];
+
+        #[cfg(feature="keyboard_tune")]
+        println!("\tCalculated threshold for ({}, {}): [{}, {}]", size.width, size.height, threshold_params[0], threshold_params[1]);
+
         // Fill out blur-pass parameters
         for stage in 0..TARGET_PASSES {
             let blur_scale = (BLUR_SCALE_BASE << (stage/2)) as f32;
@@ -518,8 +528,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 
             if stage == TARGET_PASSES-1 { // Threshold pass has 2 additional parameters
                 let target_buffer_contents_2 = [
-                    target_threshold_params[0] - target_threshold_params[1],
-                    target_threshold_params[0] + target_threshold_params[1]
+                    threshold_params[0] - threshold_params[1],
+                    threshold_params[0] + threshold_params[1]
                 ];
                 queue.write_buffer(&target_uniform_buffers[stage], f32x2_uniform_alignment, bytemuck::cast_slice(&target_buffer_contents_2));
             };
