@@ -285,7 +285,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
     let mut target_threshold_params = [0f32, 0f32];
 
     // Call this function to initialize/re-initialize the "permanent" state 
-    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, f32x2_uniform_alignment:u64, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_final_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], target_threshold_params:&[f32;2], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
+    fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, f32x2_uniform_alignment:u64, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_final_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], target_threshold_params:&[f32;2], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, Option<wgpu::BufferSize>, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
         info!("\tGetting started for size ({}, {})", size.width, size.height);
 
         // Set size
@@ -413,7 +413,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // Mutable, can be targeted by copies or by shaders
         });
 
-        { // ...and then write bytes to write-mapped uv buffer
+        if size.width != 0 && size.height != 0 { // ...and then write bytes to write-mapped uv buffer
             let mut mapped_bytes = grid_uv_buffer.slice(..).get_mapped_range_mut();
 
             random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(&mut mapped_bytes));
@@ -577,7 +577,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
             label: Some("Readback bind group"),
         });
 
-        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size).unwrap(), target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv)
+        (diagonal_texture_side, side_y, across_x.try_into().unwrap(), across_y.try_into().unwrap(), diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index.len() as u32, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, NonZeroU64::new(grid_uv_staging_size), target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv)
     }
 
     // Call generate_resize for first time
@@ -717,7 +717,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 
                             // Shifting up one row leaves an effectively blank space; fill it with new values
                             // If this were JavaScript we'd map a temp buffer here, but instead the staging belt maps one for us.
-                            {
+                            if let Some(grid_uv_staging_size) = grid_uv_staging_size {
                                 let mut mapped_bytes = grid_uv_staging_belt.write_buffer(&mut encoder, &grid_uv_buffer, grid_uv_staging_offset, grid_uv_staging_size, &device);
                                 random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(mapped_bytes.deref_mut()));
                             }
