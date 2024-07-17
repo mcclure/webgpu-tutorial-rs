@@ -2,6 +2,11 @@
 
 cargo run
 
+# Web (first time run)
+
+cargo install --locked trunk # Last successfully tested with 0.20.2
+rustup target add wasm32-unknown-unknown
+
 # Web
 
 RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build
@@ -10,7 +15,7 @@ RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build
 
 cmd.exe /c "set RUSTFLAGS=--cfg=web_sys_unstable_apis & trunk.exe build --release"
 
-# Web (Test)
+# Web (Windows, Test)
 
 cmd.exe /c "set RUSTFLAGS=--cfg=web_sys_unstable_apis & trunk.exe serve --release"
 
