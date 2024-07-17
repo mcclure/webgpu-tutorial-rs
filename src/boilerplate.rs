@@ -114,11 +114,13 @@ pub fn make_pipeline(device: &wgpu::Device, shader: &wgpu::ShaderModule, bind_gr
             module: &shader,
             entry_point: vertex_entry,
             buffers: vertex_buffers,
+            compilation_options:Default::default()
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: fragment_entry,
             targets: fragment_targets,
+            compilation_options:Default::default()
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,

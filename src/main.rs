@@ -594,10 +594,11 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         layout: Some(&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Row shift pipeline layout"),
             bind_group_layouts:&[&rowshift_bind_group_layout],
-            push_constant_ranges:&[]
+            push_constant_ranges:&[],
         })),
         module: &shader,
         entry_point: "internal_copy",
+        compilation_options:Default::default()
     });
 
     // Pipeline(s) for drawing a single fullscreen texture with an "effect"
@@ -949,7 +950,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 fn main() {
     // Initialize window
     let event_loop = EventLoop::new().unwrap();
-    let window = winit::window::Window::new(&event_loop).unwrap();
+    let window = event_loop.create_window(winit::window::Window::default_attributes()).unwrap();
 
     // Initialize audio thread and send it a crossbeam so we can talk to it
     cfg_if! {
