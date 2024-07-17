@@ -25,6 +25,7 @@ use winit::{
     window::Window, dpi::PhysicalSize,
 };
 use wgpu::util::DeviceExt;
+use log::{info, warn, trace};
 
 #[cfg(target_arch="wasm32")]
 use winit::platform::web::WindowExtWebSys;
@@ -121,7 +122,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
     // The size of a vec2<f32>
     const F32X2_SIZE:u64 = mem::size_of::<f32>() as u64*2;
     let f32x2_uniform_alignment = F32X2_SIZE.max(device.limits().min_uniform_buffer_offset_alignment.into());
-    println!("Uniform alignment? {F32X2_SIZE} vs {f32x2_uniform_alignment}");
+    info!("Uniform alignment? {F32X2_SIZE} vs {f32x2_uniform_alignment}");
 
     // A bind parameter that will become a vec2<32>
     let f32x2_bind_type = wgpu::BindingType::Buffer {
@@ -285,6 +286,8 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 
     // Call this function to initialize/re-initialize the "permanent" state 
     fn generate_resize(size:PhysicalSize<u32>, device: &wgpu::Device, queue: &wgpu::Queue, surface: &wgpu::Surface, swapchain_format: wgpu::TextureFormat, swapchain_capabilities: &wgpu::SurfaceCapabilities, f32x2_uniform_alignment:u64, diagonal_vertex_buffer: &wgpu::Buffer, diagonal_index_buffer: &wgpu::Buffer, diagonal_index_len: usize, diagonal_render_pipeline: &wgpu::RenderPipeline, grid_bind_group_layout: &wgpu::BindGroupLayout, default_sampler:&wgpu::Sampler, grid_uniform_buffer:&wgpu::Buffer, rowshift_bind_group_layout:&wgpu::BindGroupLayout, rowshift_uniform_buffer:&wgpu::Buffer, target_bind_group_layout:&wgpu::BindGroupLayout, target_final_bind_group_layout:&wgpu::BindGroupLayout, target_uniform_buffers:&[wgpu::Buffer;TARGET_PASSES], target_threshold_params:&[f32;2], readback_bind_group_layout:&wgpu::BindGroupLayout) -> (u32, f32, u64, u64, wgpu::Texture, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, u32, wgpu::BindGroup, wgpu::BindGroup, wgpu::util::StagingBelt, wgpu::BufferAddress, wgpu::BufferSize, [wgpu::TextureView;2], [wgpu::BindGroup;TARGET_PASSES], wgpu::Texture, wgpu::TextureView, wgpu::BindGroup, Vec<Arc<wgpu::Buffer>>, ReadbackBufferSend, ReadbackBufferRecv) {
+        info!("\tGetting started for size ({}, {})", size.width, size.height);
+
         // Set size
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -412,6 +415,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
 
         { // ...and then write bytes to write-mapped uv buffer
             let mut mapped_bytes = grid_uv_buffer.slice(..).get_mapped_range_mut();
+
             random_uv_push(bytemuck::cast_slice_mut::<u8, f32>(&mut mapped_bytes));
         }
         grid_uv_buffer.unmap();
@@ -516,7 +520,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
         ];
 
         #[cfg(feature="keyboard_tune")]
-        println!("\tCalculated threshold for ({}, {}): [{}, {}]", size.width, size.height, threshold_params[0], threshold_params[1]);
+        info!("\tCalculated threshold for ({}, {}): [{}, {}]", size.width, size.height, threshold_params[0], threshold_params[1]);
 
         // Fill out blur-pass parameters
         for stage in 0..TARGET_PASSES {
@@ -830,7 +834,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                                 },
                                 wgpu::Extent3d {width:AUDIO_READBACK_BUFFER_LEN as u32, height:1, depth_or_array_layers:1}
                             );
-                        } // else { println!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
+                        } // else { warn!("READBACK DROPPED"); } // Uncomment to debug AUDIO_READBACK_BUFFER_MAX_INFLIGHT
                     }
 
                     // Done
@@ -875,7 +879,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                                 });
                                 let result = audio_chunk_send.try_send(Box::new(chunk));
                                 // FIXME this prints all the time when it shouldn't
-                                if let Err(e) = result { println!("DROP AUDIO CHUNK {}", e); }
+                                if let Err(e) = result { warn!("DROP AUDIO CHUNK {}", e); }
                             }
                             readback_buffer.unmap();
                             // Drop readback buffer in channel so it can be returned to pool.
@@ -925,7 +929,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, audio_chunk_send: AudioC
                     for idx in 0..2 {
                         target_threshold_params[idx] += flow[idx] as f32 * if strong { 0.1 } else { 0.01 }
                     }
-                    println!("Keypress {flow:?}, {strong} = For {size:?} {} +/- {}", target_threshold_params[0], target_threshold_params[1]); // TODO: Something with Flow
+                    info!("Keypress {flow:?}, {strong} = For {size:?} {} +/- {}", target_threshold_params[0], target_threshold_params[1]); // TODO: Something with Flow
 
                     (diagonal_texture_side, diagonal_texture_side_ndc, diagonal_texture_count_x, diagonal_texture_count_y, diagonal_texture, grid_vertex_buffer, grid_uv_buffer, grid_index_buffer, grid_index_len, grid_bind_group, rowshift_bind_group, grid_uv_staging_belt, grid_uv_staging_offset, grid_uv_staging_size, target_views, target_bind_groups, readback_texture, readback_view, readback_bind_group, readback_buffers, readback_buffer_send, readback_buffer_recv) = generate_resize(size, &device, &queue, &surface, swapchain_format, &swapchain_capabilities, f32x2_uniform_alignment, &diagonal_vertex_buffer, &diagonal_index_buffer, diagonal_index_len, &diagonal_render_pipeline, &grid_bind_group_layout, &default_sampler, &grid_uniform_buffer, &rowshift_bind_group_layout, &rowshift_uniform_buffer, &target_bind_group_layout, &target_final_bind_group_layout, &target_uniform_buffers, &target_threshold_params, &readback_bind_group_layout);
 
@@ -973,6 +977,7 @@ fn main() {
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         console_log::init().expect("could not initialize logger");
+        trace!("Logger awake");
         // On wasm, append the canvas to the document body
         web_sys::window()
             .and_then(|win| win.document())

@@ -15,6 +15,8 @@ type AudioLog = std::fs::File;
 #[cfg(not(feature = "audio_log"))]
 type AudioLog = ();
 
+use log::{info, warn, trace};
+
 fn audio_write<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32, audio_log: &mut AudioLog)
 where
     T: Sample + FromSample<f32> + bytemuck::Pod, /* Pod constraint can be removed without audio_log */
@@ -82,7 +84,7 @@ where
             }
             sample_idx = 0;
         }
-//        println!("{}:{}, {}, {}", box_idx, sample_idx, transitioning, if transitioning { (box_idx+1)%2 } else {box_idx});
+//        info!("{}:{}, {}, {}", box_idx, sample_idx, transitioning, if transitioning { (box_idx+1)%2 } else {box_idx});
         // Chunks from the graphics thread are pre-windowed and pre-divided by two so we just need to sum them
         let out
           = chunks[
@@ -98,7 +100,7 @@ where
         // -- BOILERPLATE --
     };
 
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+    let err_fn = |err| warn!("an error occurred on stream: {}", err);
 
     #[cfg(feature = "audio_log")]
     let mut audio_log = std::fs::File::create("audio_log.raw").unwrap();
@@ -143,16 +145,16 @@ pub fn audio_spawn(audio_chunk_recv: crossbeam_channel::Receiver<Box<AudioChunk>
 
         match stream_result {
             Err(e) => {
-                println!("Failure: {}", e);
+                warn!("Audio startup failure: {}", e);
                 None
             },
             Ok(v) => {
-                println!("Boot");
+                trace!("Audio startup success");
                 Some(v)
             }
         }
     } else {
-        println!("Failure: No device");
+        warn!("Failure: No audio device");
         None
     }
 }

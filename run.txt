@@ -1,6 +1,10 @@
 # Desktop
 
-cargo run
+cargo run --release
+
+# Desktop (debug)
+
+RUST_LOG=info cargo run
 
 # Web (first time run)
 
