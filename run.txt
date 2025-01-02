@@ -13,7 +13,7 @@ rustup target add wasm32-unknown-unknown
 
 # Web
 
-RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build
+RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build --release
 
 # Web (Windows)
 

@@ -979,6 +979,7 @@ fn main() {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         console_log::init().expect("could not initialize logger");
         trace!("Logger awake");
+        window.set_prevent_default(false); // Allow right clicks (may have bad side effects...)
         // On wasm, append the canvas to the document body
         web_sys::window()
             .and_then(|win| win.document())
